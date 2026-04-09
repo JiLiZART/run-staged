@@ -6,13 +6,13 @@
 
 **Project is an empty stub — no implementation exists:**
 - Issue: The entire application logic has not been written. The only Rust source file is a `Hello, world!` placeholder.
-- Files: `crates/cli/src/main.rs`
+- Files: `crates/fast-staged/src/main.rs`
 - Impact: Nothing is functional. No config loading, no git integration, no staged file detection, no command execution, no TUI.
 - Fix approach: Implement all features described in `TODO.md` and `ROADMAP.md` from scratch.
 
-**`crates/cli/Cargo.toml` has no dependencies:**
+**`crates/fast-staged/Cargo.toml` has no dependencies:**
 - Issue: The crate has `[dependencies]` declared but empty. Every dependency needed for the real implementation (tokio, ratatui, gix, serde, thiserror, clap, etc.) is absent.
-- Files: `crates/cli/Cargo.toml`
+- Files: `crates/fast-staged/Cargo.toml`
 - Impact: No async runtime, no TUI, no git access, no config parsing — nothing will build beyond Hello World.
 - Fix approach: Add all required dependencies before writing any feature code.
 
@@ -93,7 +93,7 @@
 ## Dependencies at Risk
 
 **No Rust dependencies declared yet:**
-- Risk: `crates/cli/Cargo.toml` has an empty `[dependencies]` section. All dependencies referenced in `TODO.md` (gix, tokio, ratatui, thiserror, clap, serde, toml, serde_json, parse_duration) need to be evaluated for compatibility and security before adding.
+- Risk: `crates/fast-staged/Cargo.toml` has an empty `[dependencies]` section. All dependencies referenced in `TODO.md` (gix, tokio, ratatui, thiserror, clap, serde, toml, serde_json, parse_duration) need to be evaluated for compatibility and security before adding.
 - Impact: Nothing works without them; adding them all at once without auditing may introduce transitive vulnerabilities.
 - Migration plan: Add dependencies incrementally per feature, run `cargo audit` after each addition.
 
@@ -105,7 +105,7 @@
 ## Missing Critical Features
 
 **Entire application is unimplemented:**
-- Problem: `crates/cli/src/main.rs` only prints "Hello, world!". No git integration, no config loading, no pattern matching, no command execution, no TUI.
+- Problem: `crates/fast-staged/src/main.rs` only prints "Hello, world!". No git integration, no config loading, no pattern matching, no command execution, no TUI.
 - Blocks: The tool cannot be used for its stated purpose (running lint-staged commands on git staged files).
 
 **No error handling infrastructure:**
@@ -124,7 +124,7 @@
 
 **Zero test coverage:**
 - What's not tested: Everything — config loading, git integration, pattern matching, command execution, TUI rendering, error paths, signal handling.
-- Files: `crates/cli/src/main.rs` (only file, no tests)
+- Files: `crates/fast-staged/src/main.rs` (only file, no tests)
 - Risk: Any implementation will ship with no regression safety net.
 - Priority: High — establish at minimum unit tests for config parsing and file-pattern matching before other features.
 

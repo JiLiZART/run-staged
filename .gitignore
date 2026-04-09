@@ -130,3 +130,5 @@ Cargo.lock
 /npm
 
 .idea
+.claude/settings.local.json
+CLAUDE.local.md

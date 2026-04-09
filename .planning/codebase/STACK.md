@@ -5,7 +5,7 @@
 ## Languages
 
 **Primary:**
-- Rust (edition 2024) - All application logic in `crates/cli/src/`
+- Rust (edition 2024) - All application logic in `crates/fast-staged/src/`
 
 **Secondary:**
 - None currently present in source; `.prettierignore` references JS artifacts (wasi), suggesting future WASM/JS output may be planned
@@ -24,7 +24,7 @@
 ## Frameworks
 
 **Core:**
-- None declared yet — `crates/cli/Cargo.toml` has an empty `[dependencies]` section
+- None declared yet — `crates/fast-staged/Cargo.toml` has an empty `[dependencies]` section
 
 **Planned (documented in `TODO.md` and `ROADMAP.md`):**
 - `tokio` (async runtime, `features = ["full"]`) — async command execution, signal handling

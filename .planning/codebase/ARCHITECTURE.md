@@ -7,7 +7,7 @@
 **Overall:** CLI tool with layered pipeline architecture (planned)
 
 **Key Characteristics:**
-- Rust Cargo workspace with a single `cli` crate currently (`crates/cli`)
+- Rust Cargo workspace with a single `fast-staged` crate currently (`crates/fast-staged`)
 - The binary is a stub (`main.rs` prints "Hello, world!") — implementation is not yet written
 - Intended design is documented in `TODO.md` and `ROADMAP.md`: a pipeline of config loading → git file discovery → command matching → parallel/sequential execution → TUI rendering
 - CI pipeline targets NAPI-RS native Node.js bindings (`.node` / `.wasm` artifacts), suggesting the final distribution will be a Node.js-consumable native module in addition to (or instead of) a standalone binary
@@ -16,44 +16,47 @@
 
 **Config Layer:**
 - Purpose: Discover and parse configuration from multiple file formats
-- Planned functions: `find_config_file()`, `load_config()`, `load_config_from_package_json()`
+- Planned functions: `Config::find_file()`, `Config::load()`, `Config::load_from_package_json()`
 - Config sources searched in priority order: `.fast-staged.toml`, `fast-staged.toml`, `.fast-staged.json`, `fast-staged.json`, `package.json["fast-staged"]`
+- Planned enum `RunConfig { config: Option<PathBuf>, quiet: bool, unstaged: bool, stash: bool, allow_empty: bool, fail_on_changes: bool, revert: bool }`
 - Planned enum: `ConfigSource { TomlFile(PathBuf), JsonFile(PathBuf), PackageJson(PathBuf) }`
-- Planned struct: `Config` with `groups: Vec<Group>`, global `timeout: Option<Duration>`
-- Planned struct: `Group { name, patterns: HashMap<FilePattern, CommandList>, execution_order: ExecutionOrder, timeout: Option<Duration>, continue_on_error: bool, execution_behavior: ExecutionBehavior, path_format: PathFormat }`
+- Planned struct: `Config` with `groups: Vec<Group>`, global `timeout: Option<Duration>`, `execution_order: Option<ExecutionOrder>`, `continue_on_error: bool` 
+- Planned struct: `Group { name, patterns: HashMap<FilePattern, CommandList>, execution_order: ExecutionOrder, timeout: Option<Duration>, continue_on_error: bool, execution_behavior: ExecutionBehavior, path_format: PathFormat, run_on: ExecutionBehavior }`
 
 **Git Layer:**
 - Purpose: Obtain the list of staged (or optionally unstaged) files from the repository
-- Planned function: `get_changed_files(options)`
+- Planned function: `GitContext::get_changed_files(options)`
 - Uses `gix` crate for git operations
 - Returns `Err(AppError::NotGitRepository)` if not in a git repo, `Err(AppError::NoStagedFiles)` if nothing staged
 - Planned backup support: writes `.git/fast-staged.patch` before execution, deletes after
 
 **Matching Layer:**
 - Purpose: Map staged files to commands defined in config groups
-- Planned function: `match_files_to_commands()` → returns list of `FileCommand` structs
+- Planned function: `Commands::match_from_files()` → returns list of `FileCommand` structs
 - Iterates groups, matches files against glob patterns, collects unique file count
 - Returns `Err(AppError::NoFilesMatched)` if no files match any group
 
 **Execution Layer:**
-- Purpose: Run matched commands, respecting group execution order and timeout
-- Planned function: `execute_commands(file_commands, cancellation_flag) -> Result<(Vec<TaskState>, JoinSet<()>)>`
+- Purpose: Run matched commands, respecting group execution order, run on per-file or batch, and timeout
+- Planned function: `Commands::execute(file_commands, options)`
 - Supports `ExecutionOrder::Parallel` (default, via `tokio::task`) and `ExecutionOrder::Sequential`
 - Supports `ExecutionBehavior::PerFile` (one process per file) and `ExecutionBehavior::Batch` (all files as args to one invocation)
 - Timeout via `tokio::time::timeout()`
 - Graceful cancellation via `Arc<AtomicBool>` cancellation flag
 
 **State / Task Layer:**
-- Purpose: Track live status of each running command
-- Planned struct: `TaskState { filename, command, status: Arc<Mutex<CommandStatus>>, stash_id: Option<String> }`
-- Planned method: `TaskState::run_single_command(timeout, cancellation_flag)`
+- Purpose: Track live status of each running command use `StateModel { groups: HashMap<GroupName, HashMap<PatternName, TaskState>>, total_count, execution_time, errors: String[] }` struct
+- Handle updates to `StateModel` via `Message` enum, use `fn update(model: &StateModel, msg: Message) -> Model`
+- Planned struct: `TaskState { filenames, command, status: Arc<Mutex<CommandStatus>>, stash_id: Option<String> }`
+- Planned method: `Commands::run_command(task_state)`
 - Planned enum: `CommandStatus { Running, Done, Failed, Timeout, Cancelled }` with a `StatusDisplay` trait for colored TUI rendering
 
 **UI Layer:**
 - Purpose: Render a TUI using `ratatui` showing live command progress
-- Planned function: `run_ui(states, total_files, cancellation_flag)`
+- Planned function: `Renderer::view(model: &mut StateModel, f: &mut Frame)`
 - Displays: per-command status with elapsed time, total affected file count, total execution time, grouped output by config group
 - `--quiet` flag bypasses TUI entirely: runs tasks then prints a text summary
+- If any errors, prints them in bordered colored box and exits
 
 **Error Layer:**
 - Purpose: Centralized typed errors
@@ -63,39 +66,40 @@
 
 **Happy Path (planned):**
 
-1. `main()` parses CLI args (via `clap`): `--config`, `--unstaged`, `--allow-empty`, `--quiet`
-2. `load_config()` → finds config file, parses into `Config` with `Vec<Group>`
-3. `get_changed_files()` → calls `gix` to get staged file list; writes `.git/fast-staged.patch` backup
-4. `match_files_to_commands()` → maps files to commands per group, returns `Vec<FileCommand>` + total file count
-5. `execute_commands()` → spawns async tasks per command/file, returns `Vec<TaskState>` + `JoinSet`
-6. `run_ui()` (or quiet text output) → renders live TUI via `ratatui`, reads `TaskState` statuses until all complete
+1. `main()` parses CLI args (via `clap`): `--config`, `--unstaged`, `--allow-empty`, `--quiet` into `RunConfig`
+2. `Config::load(RunConfig)` → finds config file, parses into `Config` with `Vec<Group>` and other fields
+3. `context = GitContext::new(config); files = context.get_changed_files()` → calls `gix` to get staged file list; writes `.git/fast-staged.patch` backup via `context.create_staged_diff()`, restores it on failure
+4. `commands = Commands::from_files(files)` → maps files to commands per group, returns `Vec<FileCommand>`
+5. `current_msg = commands.execute(model, config)` (called on each render) → creates global worker pool, spawns worker per each group and executes commands in group in parallel or sequentially, each execution produces `Message` enum value that collected via worker pool
+6. `Renderer::view(model, frame)` (or quiet text output) → renders live TUI via `ratatui`, reads `StateModel`
 7. Cleanup: deletes `.git/fast-staged.patch`; if errors exist and revert configured, restores from stash
 
 **Cancellation Flow:**
 
 1. `tokio::signal::ctrl_c()` watcher sets `Arc<AtomicBool>` cancellation flag
-2. `execute_commands()` polls flag, calls `JoinSet::abort_all()`, marks tasks `CommandStatus::Cancelled`
-3. `run_ui()` polls flag, breaks render loop, restores terminal
+2. `commands.execute(model, config)` updates `model` with relevant data
+3. `Renderer::view(model)` read from model, breaks render loop, restores terminal
 
 **State Management:**
-- Each `TaskState` holds an `Arc<Mutex<CommandStatus>>` shared between the executor task and the UI render loop
-- UI reads status on each frame without blocking execution
+- `StateModel` holds all necessary state for UI
+- `Message` enum is used to communicate between async executor and UI thread
+- UI reads `StateModel` on each frame without blocking execution
 
 ## Key Abstractions
 
 **Config:**
 - Purpose: Represents parsed user configuration including groups and patterns
-- Planned file: `crates/cli/src/config.rs` (not yet created)
+- Planned file: `crates/fast-staged/src/config.rs` (not yet created)
 - Pattern: Deserialized from TOML/JSON via `serde`
 
 **Group:**
 - Purpose: A named set of file patterns with associated commands and execution settings
-- Planned file: `crates/cli/src/config.rs`
+- Planned file: `crates/fast-staged/src/config.rs`
 - Pattern: Contains `HashMap<FilePattern, CommandList>` plus execution knobs
 
-**TaskState:**
+**Commands:**
 - Purpose: Live tracking of a single command execution (one per file+command pair)
-- Planned file: `crates/cli/src/executor.rs` (not yet created)
+- Planned file: `crates/fast-staged/src/commands.rs` (not yet created)
 - Pattern: Shared state via `Arc<Mutex<T>>` between async executor and UI thread
 
 **AppError:**
@@ -106,13 +110,13 @@
 ## Entry Points
 
 **Binary Entry Point:**
-- Location: `crates/cli/src/main.rs`
+- Location: `crates/fast-staged/src/main.rs`
 - Current state: Stub — only prints "Hello, world!"
 - Planned responsibilities: Parse CLI args, call `run()`, handle top-level errors with colored output
 
 **Library Entry Point (planned):**
-- Location: `crates/cli/src/lib.rs` (not yet created)
-- Triggers: Called from `main()` or from NAPI-RS bindings
+- Location: `crates/fast-staged/src/lib.rs` (not yet created)
+- Triggers: Called from `main()`
 - Responsibilities: Orchestrates config → git → match → execute → UI pipeline via `pub async fn run()`
 
 ## Error Handling

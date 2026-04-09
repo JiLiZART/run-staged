@@ -7,7 +7,7 @@
 ```
 fast-staged/
 ├── crates/                  # Rust Cargo workspace members
-│   └── cli/                 # The sole crate (binary + future lib)
+│   └── fast-staged/         # The sole crate (binary + future lib)
 │       ├── Cargo.toml       # Crate manifest (no dependencies yet)
 │       └── src/
 │           └── main.rs      # Binary entry point (stub)
@@ -38,12 +38,12 @@ fast-staged/
 **`crates/`:**
 - Purpose: Cargo workspace members — all Rust source code lives here
 - Contains: One crate (`cli`) today; intended to expand as the project grows
-- Key files: `crates/cli/Cargo.toml`, `crates/cli/src/main.rs`
+- Key files: `crates/fast-staged/Cargo.toml`, `crates/fast-staged/src/main.rs`
 
-**`crates/cli/src/`:**
+**`crates/fast-staged/src/`:**
 - Purpose: All Rust source for the CLI binary (and future library)
 - Current state: Single `main.rs` stub
-- Planned modules (not yet created): `lib.rs`, `config.rs`, `executor.rs`, `error.rs`, `ui.rs`, `git.rs`
+- Planned modules (not yet created): `lib.rs`, `config.rs`, `commands.rs`, `error.rs`, `renderer.rs`, `git.rs`
 
 **`.cargo/`:**
 - Purpose: Workspace-level Cargo configuration
@@ -65,7 +65,7 @@ fast-staged/
 ## Key File Locations
 
 **Entry Points:**
-- `crates/cli/src/main.rs`: Binary entry point — currently a stub
+- `crates/fast-staged/src/main.rs`: Binary entry point — currently a stub
 
 **Workspace Configuration:**
 - `Cargo.toml`: Workspace definition + release profile (LTO, size optimization, strip symbols)
@@ -98,22 +98,22 @@ fast-staged/
 ## Where to Add New Code
 
 **New Rust module (e.g., config parsing):**
-- Implementation: `crates/cli/src/<module_name>.rs`
-- Declare in: `crates/cli/src/lib.rs` (once created) with `pub mod <module_name>;`
+- Implementation: `crates/fast-staged/src/<module_name>.rs`
+- Declare in: `crates/fast-staged/src/lib.rs` (once created) with `pub mod <module_name>;`
 
 **New dependency:**
-- Add to: `crates/cli/Cargo.toml` under `[dependencies]`
+- Add to: `crates/fast-staged/Cargo.toml` under `[dependencies]`
 - For workspace-shared deps (when more crates added): `Cargo.toml` under `[workspace.dependencies]`
 
 **New CLI subcommand or flag:**
-- Entry: `crates/cli/src/main.rs` (or a dedicated `cli.rs` module using `clap`)
+- Entry: `crates/fast-staged/src/main.rs` (or a dedicated `cli.rs` module using `clap`)
 
 **New test:**
 - Unit tests: inline in the relevant source file using `#[cfg(test)] mod tests { ... }`
-- Integration tests: `crates/cli/tests/` directory (not yet created)
+- Integration tests: `crates/fast-staged/tests/` directory (not yet created)
 
 **New config file format support:**
-- Config discovery: extend `find_config_file()` in `crates/cli/src/config.rs`
+- Config discovery: extend `find_config_file()` in `crates/fast-staged/src/config.rs`
 
 **New CI target:**
 - Add matrix entry to the `build` job in `.github/workflows/CI.yml`
