@@ -90,12 +90,13 @@ fn parse_json_value(
             });
         }
 
-        // Both structured and flat detection failed — produce a meaningful error.
-        let structured_err: serde_json::Error =
-            serde_json::from_value::<RawJsonConfig>(raw).unwrap_err();
-        Err(AppError::ConfigInvalid(format!(
-            "{path_display}: expected structured config or flat glob-to-commands mapping: {structured_err}"
-        )))
+        // Flat detection failed — try structured parse (named groups without config field names).
+        match serde_json::from_value::<RawJsonConfig>(raw) {
+            Ok(structured) => build_config_from_json(structured, source, path_display),
+            Err(structured_err) => Err(AppError::ConfigInvalid(format!(
+                "{path_display}: expected structured config or flat glob-to-commands mapping: {structured_err}"
+            ))),
+        }
     }
 }
 
@@ -129,12 +130,8 @@ fn build_config_from_json(
         groups.push(group);
     }
 
-    // Process named groups from the flattened HashMap.
-    let mut named_group_names: Vec<String> = raw.groups.keys().cloned().collect();
-    named_group_names.sort();
-
-    for group_name in named_group_names {
-        let value = &raw.groups[&group_name];
+    // Process named groups from the flattened map (insertion order preserved via preserve_order feature).
+    for (group_name, value) in &raw.groups {
         // Only process object values (skip non-object entries)
         if !value.is_object() {
             continue;
@@ -161,7 +158,7 @@ fn build_config_from_json(
         let group = resolve_group(
             RawGroupSettings {
                 patterns,
-                name: group_name,
+                name: group_name.clone(),
                 timeout: raw_group.timeout,
                 execution_order: raw_group.execution_order,
                 continue_on_error: raw_group.continue_on_error,
@@ -331,5 +328,33 @@ mod tests {
             err.contains("no patterns"),
             "Expected no patterns error (structured parse), got: {err}"
         );
+    }
+
+    #[test]
+    fn test_json_named_groups_preserve_declaration_order() {
+        let json = r#"{
+            "zebra": { "patterns": { "*.ts": ["eslint"] } },
+            "alpha": { "patterns": { "*.rs": ["cargo fmt"] } },
+            "middle": { "patterns": { "*.go": ["gofmt"] } }
+        }"#;
+        let config = parse(json).unwrap();
+        assert_eq!(config.groups.len(), 3);
+        assert_eq!(config.groups[0].name, "zebra");
+        assert_eq!(config.groups[1].name, "alpha");
+        assert_eq!(config.groups[2].name, "middle");
+    }
+
+    #[test]
+    fn test_json_default_group_comes_first_before_named() {
+        let json = r#"{
+            "patterns": { "*.md": ["prettier"] },
+            "beta": { "patterns": { "*.ts": ["eslint"] } },
+            "alpha": { "patterns": { "*.rs": ["cargo fmt"] } }
+        }"#;
+        let config = parse(json).unwrap();
+        assert_eq!(config.groups.len(), 3);
+        assert_eq!(config.groups[0].name, "default");
+        assert_eq!(config.groups[1].name, "beta");
+        assert_eq!(config.groups[2].name, "alpha");
     }
 }

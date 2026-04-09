@@ -75,7 +75,7 @@ pub(crate) struct RawConfig {
     pub per_file: Option<bool>,
     pub patterns: Option<HashMap<String, Vec<String>>>,
     #[serde(flatten)]
-    pub groups: HashMap<String, toml::Value>,
+    pub groups: toml::map::Map<String, toml::Value>,
 }
 
 /// Raw group config for TOML deserialization.
@@ -100,5 +100,5 @@ pub(crate) struct RawJsonConfig {
     pub per_file: Option<bool>,
     pub patterns: Option<HashMap<String, Vec<String>>>,
     #[serde(flatten)]
-    pub groups: HashMap<String, serde_json::Value>,
+    pub groups: serde_json::Map<String, serde_json::Value>,
 }

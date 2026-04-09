@@ -56,11 +56,7 @@ pub fn parse_toml_str(
     // Process named groups from the flattened HashMap.
     // Each entry in raw.groups is a named sub-table (e.g., [group1]).
     // We attempt to deserialize each entry as RawGroupConfig, skipping non-table values.
-    let mut named_group_names: Vec<String> = raw.groups.keys().cloned().collect();
-    named_group_names.sort(); // deterministic order
-
-    for group_name in named_group_names {
-        let value = &raw.groups[&group_name];
+    for (group_name, value) in &raw.groups {
         // Skip entries that are not tables (e.g., scalar values leaked via flatten)
         if !value.is_table() {
             continue;
@@ -79,7 +75,7 @@ pub fn parse_toml_str(
         let group = resolve_group(
             RawGroupSettings {
                 patterns,
-                name: group_name,
+                name: group_name.clone(),
                 timeout: raw_group.timeout,
                 execution_order: raw_group.execution_order,
                 continue_on_error: raw_group.continue_on_error,
@@ -271,6 +267,67 @@ timeout = "10s"
         assert_eq!(
             config.groups[0].timeout,
             Some(std::time::Duration::from_secs(10))
+        );
+    }
+
+    #[test]
+    fn test_named_groups_preserve_declaration_order() {
+        let toml = r#"
+[zebra]
+[zebra.patterns]
+"*.ts" = ["eslint"]
+
+[alpha]
+[alpha.patterns]
+"*.rs" = ["cargo fmt"]
+
+[middle]
+[middle.patterns]
+"*.go" = ["gofmt"]
+"#;
+        let config = parse(toml).unwrap();
+        assert_eq!(config.groups.len(), 3);
+        assert_eq!(config.groups[0].name, "zebra");
+        assert_eq!(config.groups[1].name, "alpha");
+        assert_eq!(config.groups[2].name, "middle");
+    }
+
+    #[test]
+    fn test_default_group_comes_first_before_named_groups() {
+        let toml = r#"
+[patterns]
+"*.md" = ["prettier"]
+
+[beta]
+[beta.patterns]
+"*.ts" = ["eslint"]
+
+[alpha]
+[alpha.patterns]
+"*.rs" = ["cargo fmt"]
+"#;
+        let config = parse(toml).unwrap();
+        assert_eq!(config.groups.len(), 3);
+        assert_eq!(config.groups[0].name, "default");
+        assert_eq!(config.groups[1].name, "beta");
+        assert_eq!(config.groups[2].name, "alpha");
+    }
+
+    #[test]
+    fn test_all_named_groups_empty_patterns_returns_error() {
+        let toml = r#"
+[lint]
+[lint.patterns]
+
+[format]
+[format.patterns]
+"#;
+        let result = parse(toml);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("no patterns"),
+            "Expected 'no patterns' error, got: {err}"
         );
     }
 }
