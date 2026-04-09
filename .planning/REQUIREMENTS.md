@@ -12,10 +12,10 @@
 - [x] **CFG-03**: Tool parses JSON config with glob patterns mapped to commands
 - [x] **CFG-04**: Tool reads fast-staged config section from package.json
 - [x] **CFG-05**: Tool validates config and shows clear error messages for invalid configs
-- [ ] **CFG-06**: Tool supports named groups with per-group execution_order setting
-- [ ] **CFG-07**: Tool supports per-group timeout override
-- [ ] **CFG-08**: Tool supports per-group continue_on_error setting
-- [ ] **CFG-09**: Tool supports per-group per-file vs batch execution mode
+- [x] **CFG-06**: Tool supports named groups with per-group execution_order setting
+- [x] **CFG-07**: Tool supports per-group timeout override
+- [x] **CFG-08**: Tool supports per-group continue_on_error setting
+- [x] **CFG-09**: Tool supports per-group per-file vs batch execution mode
 - [ ] **CFG-10**: Tool discovers and parses lint-staged JSON/YAML configs (no JS functions)
 - [ ] **CFG-11**: Tool shows clear error when encountering JS function configs
 
@@ -92,10 +92,10 @@
 | CFG-03 | Phase 2 | Complete |
 | CFG-04 | Phase 2 | Complete |
 | CFG-05 | Phase 2 | Complete |
-| CFG-06 | Phase 3 | Pending |
-| CFG-07 | Phase 3 | Pending |
-| CFG-08 | Phase 3 | Pending |
-| CFG-09 | Phase 3 | Pending |
+| CFG-06 | Phase 3 | Complete |
+| CFG-07 | Phase 3 | Complete |
+| CFG-08 | Phase 3 | Complete |
+| CFG-09 | Phase 3 | Complete |
 | CFG-10 | Phase 9 | Pending |
 | CFG-11 | Phase 9 | Pending |
 | GIT-01 | Phase 4 | Pending |

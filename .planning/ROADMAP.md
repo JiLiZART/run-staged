@@ -14,7 +14,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Foundation** - Typed error enum, Cargo deps, CI fix, and correct exit code wiring (completed 2026-04-09)
 - [ ] **Phase 2: Config Core** - Multi-format config discovery and parsing (TOML, JSON, package.json)
-- [ ] **Phase 3: Advanced Config** - Named groups with per-group timeout, execution order, and error settings
+- [x] **Phase 3: Advanced Config** - Named groups with per-group timeout, execution order, and error settings (completed 2026-04-09)
 - [ ] **Phase 4: Git Integration** - Staged file detection via gix plus patch backup and restore
 - [ ] **Phase 5: Execution Core** - Glob matching, parallel and sequential command execution, timeouts
 - [ ] **Phase 6: CLI Interface** - Full clap argument parsing, --version, and --help
@@ -63,10 +63,10 @@ Plans:
   2. A group with `timeout: 30s` stops its command after 30 seconds and reports timeout
   3. A group with `continue_on_error: true` does not abort remaining groups when its command fails
   4. A group with `per_file: true` invokes the command once per matched file; `per_file: false` (default) passes all files as arguments
-**Plans:** 1 plan
+**Plans:** 1/1 plans complete
 
 Plans:
-- [ ] 03-01-PLAN.md — Fix group ordering, add per-group override tests (CFG-06 through CFG-09)
+- [x] 03-01-PLAN.md — Fix group ordering, add per-group override tests (CFG-06 through CFG-09)
 
 ### Phase 4: Git Integration
 **Goal**: Users can trust that the tool sees exactly the right staged files and that their index is safe if a command fails
@@ -150,7 +150,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 |-------|----------------|--------|-----------|
 | 1. Foundation | 1/1 | Complete   | 2026-04-09 |
 | 2. Config Core | 1/2 | In Progress|  |
-| 3. Advanced Config | 0/1 | Not started | - |
+| 3. Advanced Config | 1/1 | Complete   | 2026-04-09 |
 | 4. Git Integration | 0/TBD | Not started | - |
 | 5. Execution Core | 0/TBD | Not started | - |
 | 6. CLI Interface | 0/TBD | Not started | - |
