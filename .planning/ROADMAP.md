@@ -48,10 +48,10 @@ Plans:
   3. A JSON config with the same structure is parsed identically to TOML
   4. `package.json` with a `fast-staged` key is read and its config is used
   5. An invalid config (bad syntax or unknown field) prints a clear error message and exits non-zero
-**Plans:** 2 plans
+**Plans:** 1/2 plans executed
 
 Plans:
-- [ ] 02-01-PLAN.md — Config types, TOML/JSON parsing, validation, cascading defaults
+- [x] 02-01-PLAN.md — Config types, TOML/JSON parsing, validation, cascading defaults
 - [ ] 02-02-PLAN.md — Config discovery (priority walk to git root), package.json, lib.rs wiring
 
 ### Phase 3: Advanced Config
@@ -146,7 +146,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Foundation | 1/1 | Complete   | 2026-04-09 |
-| 2. Config Core | 0/2 | Planning complete | - |
+| 2. Config Core | 1/2 | In Progress|  |
 | 3. Advanced Config | 0/TBD | Not started | - |
 | 4. Git Integration | 0/TBD | Not started | - |
 | 5. Execution Core | 0/TBD | Not started | - |
