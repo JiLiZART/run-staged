@@ -18,7 +18,7 @@ Run linting/formatting commands on staged files faster than lint-staged, with ze
 
 ### Active
 
-- [ ] Config discovery and parsing (TOML, JSON, package.json, lint-staged compat)
+- [x] Config discovery and parsing (TOML, JSON, package.json) — Validated in Phase 2: Config Core
 - [ ] Git staged file detection via gix
 - [ ] Glob pattern matching of staged files to command groups
 - [ ] Parallel and sequential command execution with timeout
@@ -39,6 +39,7 @@ Run linting/formatting commands on staged files faster than lint-staged, with ze
 ## Context
 
 - Phase 1 complete — crate renamed to fast-staged, 10 deps declared, AppError enum (11 variants), async main with exit codes, pure Rust CI
+- Phase 2 complete — config module with types, TOML/JSON parsers, priority-based discovery (CWD to git root), package.json support, 40 tests
 - CI workflow replaced: NAPI-RS removed, now stable Rust with fmt + clippy + test
 - Pre-commit hook (husky + lint-staged) is broken due to missing package.json
 - TODO.md and ROADMAP.md contain detailed implementation specs for all layers
@@ -85,4 +86,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-09 after Phase 1: Foundation completion*
+*Last updated: 2026-04-09 after Phase 2: Config Core completion*
