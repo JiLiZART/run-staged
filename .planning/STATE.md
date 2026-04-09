@@ -19,7 +19,7 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-09)
 
 **Core value:** Run linting/formatting commands on staged files faster than lint-staged, with zero Node.js runtime dependency.
-**Current focus:** Phase 02 — config-core
+**Current focus:** Phase 3 — advanced-config
 
 ## Current Position
 
@@ -76,10 +76,10 @@ None yet.
 
 - Research flagged: gix staged-file API shape varies by minor version — verify on crates.io before Phase 4
 - Research flagged: exact ratatui async event loop pattern for current version — verify before Phase 8
-- Existing CI workflow is NAPI-RS based — must be replaced in Phase 1
+- ~~Existing CI workflow is NAPI-RS based — must be replaced in Phase 1~~ Resolved in Phase 1
 
 ## Session Continuity
 
-Last session: 2026-04-09T20:14:33.539Z
-Stopped at: Completed 02-config-core-02-PLAN.md
+Last session: 2026-04-09
+Stopped at: Phase 2 complete, ready to plan Phase 3
 Resume file: None
