@@ -271,6 +271,134 @@ timeout = "10s"
     }
 
     #[test]
+    fn test_group_execution_order_overrides_root() {
+        let toml = r#"
+execution_order = "parallel"
+
+[lint]
+execution_order = "sequential"
+[lint.patterns]
+"*.rs" = ["cargo clippy"]
+"#;
+        let config = parse(toml).unwrap();
+        assert_eq!(config.execution_order, ExecutionOrder::Parallel);
+        assert_eq!(config.groups[0].execution_order, ExecutionOrder::Sequential);
+    }
+
+    #[test]
+    fn test_group_timeout_overrides_root() {
+        let toml = r#"
+timeout = "30s"
+
+[lint]
+timeout = "10s"
+[lint.patterns]
+"*.rs" = ["cargo clippy"]
+"#;
+        let config = parse(toml).unwrap();
+        assert_eq!(config.timeout, Some(std::time::Duration::from_secs(30)));
+        assert_eq!(
+            config.groups[0].timeout,
+            Some(std::time::Duration::from_secs(10))
+        );
+    }
+
+    #[test]
+    fn test_group_inherits_root_timeout_when_unset() {
+        let toml = r#"
+timeout = "30s"
+
+[lint]
+[lint.patterns]
+"*.rs" = ["cargo clippy"]
+"#;
+        let config = parse(toml).unwrap();
+        assert_eq!(
+            config.groups[0].timeout,
+            Some(std::time::Duration::from_secs(30))
+        );
+    }
+
+    #[test]
+    fn test_group_continue_on_error_overrides_root() {
+        let toml = r#"
+continue_on_error = false
+
+[format]
+continue_on_error = true
+[format.patterns]
+"*.rs" = ["cargo fmt"]
+"#;
+        let config = parse(toml).unwrap();
+        assert!(!config.continue_on_error);
+        assert!(config.groups[0].continue_on_error);
+    }
+
+    #[test]
+    fn test_group_per_file_true() {
+        let toml = r#"
+[lint]
+per_file = true
+[lint.patterns]
+"*.rs" = ["cargo clippy"]
+"#;
+        let config = parse(toml).unwrap();
+        assert!(config.groups[0].per_file);
+    }
+
+    #[test]
+    fn test_group_per_file_defaults_to_false() {
+        let toml = r#"
+[lint]
+[lint.patterns]
+"*.rs" = ["cargo clippy"]
+"#;
+        let config = parse(toml).unwrap();
+        assert!(!config.groups[0].per_file);
+    }
+
+    #[test]
+    fn test_multi_group_mixed_overrides() {
+        let toml = r#"
+execution_order = "parallel"
+timeout = "30s"
+
+[lint]
+execution_order = "sequential"
+timeout = "10s"
+[lint.patterns]
+"*.rs" = ["cargo clippy"]
+
+[format]
+continue_on_error = true
+per_file = true
+[format.patterns]
+"*.rs" = ["cargo fmt"]
+"*.ts" = ["prettier --write"]
+"#;
+        let config = parse(toml).unwrap();
+        assert_eq!(config.groups.len(), 2);
+        // lint group
+        assert_eq!(config.groups[0].name, "lint");
+        assert_eq!(config.groups[0].execution_order, ExecutionOrder::Sequential);
+        assert_eq!(
+            config.groups[0].timeout,
+            Some(std::time::Duration::from_secs(10))
+        );
+        assert!(!config.groups[0].continue_on_error); // inherits root default
+        assert!(!config.groups[0].per_file); // inherits root default
+        // format group
+        assert_eq!(config.groups[1].name, "format");
+        assert_eq!(config.groups[1].execution_order, ExecutionOrder::Parallel); // inherits root
+        assert_eq!(
+            config.groups[1].timeout,
+            Some(std::time::Duration::from_secs(30))
+        ); // inherits root
+        assert!(config.groups[1].continue_on_error);
+        assert!(config.groups[1].per_file);
+    }
+
+    #[test]
     fn test_named_groups_preserve_declaration_order() {
         let toml = r#"
 [zebra]

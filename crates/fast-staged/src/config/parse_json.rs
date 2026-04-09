@@ -331,6 +331,93 @@ mod tests {
     }
 
     #[test]
+    fn test_json_group_execution_order_overrides_root() {
+        let json = r#"{
+            "execution_order": "parallel",
+            "lint": {
+                "execution_order": "sequential",
+                "patterns": { "*.rs": ["cargo clippy"] }
+            }
+        }"#;
+        let config = parse(json).unwrap();
+        assert_eq!(config.execution_order, ExecutionOrder::Parallel);
+        assert_eq!(config.groups[0].execution_order, ExecutionOrder::Sequential);
+    }
+
+    #[test]
+    fn test_json_group_timeout_override_and_inheritance() {
+        let json = r#"{
+            "timeout": "30s",
+            "lint": {
+                "timeout": "10s",
+                "patterns": { "*.rs": ["cargo clippy"] }
+            },
+            "format": {
+                "patterns": { "*.rs": ["cargo fmt"] }
+            }
+        }"#;
+        let config = parse(json).unwrap();
+        assert_eq!(config.groups[0].name, "lint");
+        assert_eq!(
+            config.groups[0].timeout,
+            Some(std::time::Duration::from_secs(10))
+        );
+        assert_eq!(config.groups[1].name, "format");
+        assert_eq!(
+            config.groups[1].timeout,
+            Some(std::time::Duration::from_secs(30))
+        );
+    }
+
+    #[test]
+    fn test_json_group_continue_on_error_and_per_file() {
+        let json = r#"{
+            "format": {
+                "continue_on_error": true,
+                "per_file": true,
+                "patterns": { "*.rs": ["cargo fmt"] }
+            }
+        }"#;
+        let config = parse(json).unwrap();
+        assert!(config.groups[0].continue_on_error);
+        assert!(config.groups[0].per_file);
+    }
+
+    #[test]
+    fn test_json_multi_group_mixed_overrides() {
+        let json = r#"{
+            "execution_order": "parallel",
+            "timeout": "30s",
+            "lint": {
+                "execution_order": "sequential",
+                "timeout": "10s",
+                "patterns": { "*.rs": ["cargo clippy"] }
+            },
+            "format": {
+                "continue_on_error": true,
+                "per_file": true,
+                "patterns": { "*.rs": ["cargo fmt"], "*.ts": ["prettier --write"] }
+            }
+        }"#;
+        let config = parse(json).unwrap();
+        assert_eq!(config.groups.len(), 2);
+        assert_eq!(config.groups[0].name, "lint");
+        assert_eq!(config.groups[0].execution_order, ExecutionOrder::Sequential);
+        assert_eq!(
+            config.groups[0].timeout,
+            Some(std::time::Duration::from_secs(10))
+        );
+        assert_eq!(config.groups[1].name, "format");
+        assert_eq!(config.groups[1].execution_order, ExecutionOrder::Parallel);
+        assert_eq!(
+            config.groups[1].timeout,
+            Some(std::time::Duration::from_secs(30))
+        );
+        assert!(config.groups[1].continue_on_error);
+        assert!(config.groups[1].per_file);
+    }
+
+    #[test]
     fn test_json_named_groups_preserve_declaration_order() {
         let json = r#"{
             "zebra": { "patterns": { "*.ts": ["eslint"] } },
