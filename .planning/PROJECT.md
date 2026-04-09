@@ -24,7 +24,7 @@ Run linting/formatting commands on staged files faster than lint-staged, with ze
 - [ ] Parallel and sequential command execution with timeout
 - [ ] Live ratatui TUI with per-command progress, spinners, elapsed time
 - [ ] CLI argument parsing (--config, --quiet, --unstaged, --allow-empty, --stash, --revert)
-- [ ] Typed error handling with user-friendly messages
+- [x] Typed error handling with user-friendly messages — Validated in Phase 1: Foundation
 - [ ] Signal handling (Ctrl+C) with graceful cleanup
 - [ ] Git stash backup before execution, restore on failure
 - [ ] Dual distribution: cargo install + npm binary packages for all platforms
@@ -38,8 +38,8 @@ Run linting/formatting commands on staged files faster than lint-staged, with ze
 
 ## Context
 
-- Existing codebase is a skeleton: main.rs prints "Hello, world!", no dependencies declared
-- CI workflow is currently NAPI-RS based and needs replacement with standard Rust binary CI
+- Phase 1 complete — crate renamed to fast-staged, 10 deps declared, AppError enum (11 variants), async main with exit codes, pure Rust CI
+- CI workflow replaced: NAPI-RS removed, now stable Rust with fmt + clippy + test
 - Pre-commit hook (husky + lint-staged) is broken due to missing package.json
 - TODO.md and ROADMAP.md contain detailed implementation specs for all layers
 - Config format priority: .fast-staged.toml > .fast-staged.json > fast-staged.toml > fast-staged.json > package.json[fast-staged] > lint-staged configs
@@ -48,7 +48,7 @@ Run linting/formatting commands on staged files faster than lint-staged, with ze
 
 ## Constraints
 
-- **Language**: Rust (edition 2024), nightly toolchain for size optimization flags
+- **Language**: Rust (edition 2024), stable toolchain (nightly flags removed in Phase 1)
 - **Async runtime**: tokio with full features
 - **Git**: gix crate (no shelling out to git CLI)
 - **TUI**: ratatui for terminal rendering
@@ -85,4 +85,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-09 after initialization*
+*Last updated: 2026-04-09 after Phase 1: Foundation completion*
