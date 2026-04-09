@@ -1,20 +1,15 @@
+[workspace]
+members = [
+  "crates/*",
+]
+resolver = "2"
 
-[package]
-authors = ["LongYinan <lynweklm@gmail.com>"]
-edition = "2021"
-name = "fast_staged"
-version = "0.1.0"
-
-[lib]
-crate-type = ["cdylib"]
-
-[dependencies]
-napi = "3.0.0"
-napi-derive = "3.0.0"
-
-[build-dependencies]
-napi-build = "2"
+[profile.dev]
+incremental = true # Compile your binary in smaller steps.
 
 [profile.release]
-lto = true
-strip = "symbols"
+codegen-units = 1 # Allows LLVM to perform better optimization.
+lto = true # Enables link-time-optimizations.
+opt-level = "z"  # Optimize for size.
+panic = "abort" # Higher performance by disabling panic handlers.
+strip = true # Ensures debug symbols are removed.⏎
