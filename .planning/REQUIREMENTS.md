@@ -55,7 +55,7 @@
 
 ### Error Handling
 
-- [ ] **ERR-01**: Tool uses typed AppError enum with thiserror
+- [x] **ERR-01**: Tool uses typed AppError enum with thiserror
 - [ ] **ERR-02**: Tool shows user-friendly error messages with actionable hints
 - [ ] **ERR-03**: Tool restores terminal on panic (ratatui panic hook)
 
@@ -120,7 +120,7 @@
 | UI-03 | Phase 8 | Pending |
 | UI-04 | Phase 8 | Pending |
 | UI-05 | Phase 8 | Pending |
-| ERR-01 | Phase 1 | Pending |
+| ERR-01 | Phase 1 | Complete |
 | ERR-02 | Phase 7 | Pending |
 | ERR-03 | Phase 7 | Pending |
 

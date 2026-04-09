@@ -12,7 +12,7 @@ Build a fast Rust replacement for lint-staged, delivered in 9 phases. Starting f
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [ ] **Phase 1: Foundation** - Typed error enum, Cargo deps, CI fix, and correct exit code wiring
+- [x] **Phase 1: Foundation** - Typed error enum, Cargo deps, CI fix, and correct exit code wiring (completed 2026-04-09)
 - [ ] **Phase 2: Config Core** - Multi-format config discovery and parsing (TOML, JSON, package.json)
 - [ ] **Phase 3: Advanced Config** - Named groups with per-group timeout, execution order, and error settings
 - [ ] **Phase 4: Git Integration** - Staged file detection via gix plus patch backup and restore
@@ -33,10 +33,10 @@ Decimal phases appear between their surrounding integers in numeric order.
   2. Running the binary exits with code 0 on success and non-zero on any typed error
   3. AppError enum exists with variants covering config, git, execution, and IO failure categories
   4. CI workflow builds and tests the binary (no NAPI-RS artifacts)
-**Plans:** 1 plan
+**Plans:** 1/1 plans complete
 
 Plans:
-- [ ] 01-01-PLAN.md — Crate rename, dependencies, AppError enum, async main, integration test, CI workflow
+- [x] 01-01-PLAN.md — Crate rename, dependencies, AppError enum, async main, integration test, CI workflow
 
 ### Phase 2: Config Core
 **Goal**: Users can store their linting config in any supported format and the tool discovers and parses it correctly
@@ -141,7 +141,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Foundation | 0/1 | Planning complete | - |
+| 1. Foundation | 1/1 | Complete   | 2026-04-09 |
 | 2. Config Core | 0/TBD | Not started | - |
 | 3. Advanced Config | 0/TBD | Not started | - |
 | 4. Git Integration | 0/TBD | Not started | - |
