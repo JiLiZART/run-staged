@@ -33,7 +33,10 @@ Decimal phases appear between their surrounding integers in numeric order.
   2. Running the binary exits with code 0 on success and non-zero on any typed error
   3. AppError enum exists with variants covering config, git, execution, and IO failure categories
   4. CI workflow builds and tests the binary (no NAPI-RS artifacts)
-**Plans**: TBD
+**Plans:** 1 plan
+
+Plans:
+- [ ] 01-01-PLAN.md — Crate rename, dependencies, AppError enum, async main, integration test, CI workflow
 
 ### Phase 2: Config Core
 **Goal**: Users can store their linting config in any supported format and the tool discovers and parses it correctly
@@ -138,7 +141,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Foundation | 0/TBD | Not started | - |
+| 1. Foundation | 0/1 | Planning complete | - |
 | 2. Config Core | 0/TBD | Not started | - |
 | 3. Advanced Config | 0/TBD | Not started | - |
 | 4. Git Integration | 0/TBD | Not started | - |
