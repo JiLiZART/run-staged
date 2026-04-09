@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: Ready to execute
-stopped_at: Completed 02-config-core-01-PLAN.md
-last_updated: "2026-04-09T20:09:09.381Z"
+status: Phase complete — ready for verification
+stopped_at: Completed 02-config-core-02-PLAN.md
+last_updated: "2026-04-09T20:14:33.587Z"
 progress:
   total_phases: 9
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 3
-  completed_plans: 2
+  completed_plans: 3
 ---
 
 # Project State
@@ -48,6 +48,7 @@ Plan: 2 of 2
 *Updated after each plan completion*
 | Phase 01-foundation P01 | 4 | 3 tasks | 7 files |
 | Phase 02-config-core P01 | 7 | 2 tasks | 6 files |
+| Phase 02-config-core P02 | 12 | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -64,6 +65,8 @@ Recent decisions affecting current work:
 - [Phase 01-foundation]: Crate renamed from 'cli' to 'fast-staged'; NAPI-RS CI replaced with pure Rust stable workflow; nightly -Z flags removed from .cargo/config.toml
 - [Phase 02-config-core]: serde(flatten) with HashMap<String, toml::Value> for named TOML groups; scalar unknown fields silently skipped — deny_unknown_fields only on RawGroupConfig
 - [Phase 02-config-core]: Flat JSON detection gated on absence of config field names to prevent Pitfall 7 false positives
+- [Phase 02-config-core]: Git root detection uses .git/ directory scan (not gix) for Phase 2 — avoids gix API complexity before Phase 4
+- [Phase 02-config-core]: Integration tests create .git/ in each temp dir to isolate walk from real project tree
 
 ### Pending Todos
 
@@ -77,6 +80,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-09T20:09:09.335Z
-Stopped at: Completed 02-config-core-01-PLAN.md
+Last session: 2026-04-09T20:14:33.539Z
+Stopped at: Completed 02-config-core-02-PLAN.md
 Resume file: None

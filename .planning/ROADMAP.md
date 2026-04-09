@@ -52,7 +52,7 @@ Plans:
 
 Plans:
 - [x] 02-01-PLAN.md — Config types, TOML/JSON parsing, validation, cascading defaults
-- [ ] 02-02-PLAN.md — Config discovery (priority walk to git root), package.json, lib.rs wiring
+- [x] 02-02-PLAN.md — Config discovery (priority walk to git root), package.json, lib.rs wiring
 
 ### Phase 3: Advanced Config
 **Goal**: Users can control execution order, timeouts, and error behavior per command group in their config

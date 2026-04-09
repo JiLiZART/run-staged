@@ -7,10 +7,10 @@
 
 ### Config Discovery & Parsing
 
-- [ ] **CFG-01**: Tool discovers config files in priority order: .fast-staged.toml > .fast-staged.json > fast-staged.toml > fast-staged.json > package.json[fast-staged]
+- [x] **CFG-01**: Tool discovers config files in priority order: .fast-staged.toml > .fast-staged.json > fast-staged.toml > fast-staged.json > package.json[fast-staged]
 - [x] **CFG-02**: Tool parses TOML config with glob patterns mapped to commands
 - [x] **CFG-03**: Tool parses JSON config with glob patterns mapped to commands
-- [ ] **CFG-04**: Tool reads fast-staged config section from package.json
+- [x] **CFG-04**: Tool reads fast-staged config section from package.json
 - [x] **CFG-05**: Tool validates config and shows clear error messages for invalid configs
 - [ ] **CFG-06**: Tool supports named groups with per-group execution_order setting
 - [ ] **CFG-07**: Tool supports per-group timeout override
@@ -87,10 +87,10 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| CFG-01 | Phase 2 | Pending |
+| CFG-01 | Phase 2 | Complete |
 | CFG-02 | Phase 2 | Complete |
 | CFG-03 | Phase 2 | Complete |
-| CFG-04 | Phase 2 | Pending |
+| CFG-04 | Phase 2 | Complete |
 | CFG-05 | Phase 2 | Complete |
 | CFG-06 | Phase 3 | Pending |
 | CFG-07 | Phase 3 | Pending |
