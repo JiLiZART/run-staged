@@ -87,48 +87,48 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| CFG-01 | TBD | Pending |
-| CFG-02 | TBD | Pending |
-| CFG-03 | TBD | Pending |
-| CFG-04 | TBD | Pending |
-| CFG-05 | TBD | Pending |
-| CFG-06 | TBD | Pending |
-| CFG-07 | TBD | Pending |
-| CFG-08 | TBD | Pending |
-| CFG-09 | TBD | Pending |
-| CFG-10 | TBD | Pending |
-| CFG-11 | TBD | Pending |
-| GIT-01 | TBD | Pending |
-| GIT-02 | TBD | Pending |
-| GIT-03 | TBD | Pending |
-| GIT-04 | TBD | Pending |
-| GIT-05 | TBD | Pending |
-| GIT-06 | TBD | Pending |
-| GIT-07 | TBD | Pending |
-| EXEC-01 | TBD | Pending |
-| EXEC-02 | TBD | Pending |
-| EXEC-03 | TBD | Pending |
-| EXEC-04 | TBD | Pending |
-| EXEC-05 | TBD | Pending |
-| EXEC-06 | TBD | Pending |
-| EXEC-07 | TBD | Pending |
-| CLI-01 | TBD | Pending |
-| CLI-02 | TBD | Pending |
-| CLI-03 | TBD | Pending |
-| UI-01 | TBD | Pending |
-| UI-02 | TBD | Pending |
-| UI-03 | TBD | Pending |
-| UI-04 | TBD | Pending |
-| UI-05 | TBD | Pending |
-| ERR-01 | TBD | Pending |
-| ERR-02 | TBD | Pending |
-| ERR-03 | TBD | Pending |
+| CFG-01 | Phase 2 | Pending |
+| CFG-02 | Phase 2 | Pending |
+| CFG-03 | Phase 2 | Pending |
+| CFG-04 | Phase 2 | Pending |
+| CFG-05 | Phase 2 | Pending |
+| CFG-06 | Phase 3 | Pending |
+| CFG-07 | Phase 3 | Pending |
+| CFG-08 | Phase 3 | Pending |
+| CFG-09 | Phase 3 | Pending |
+| CFG-10 | Phase 9 | Pending |
+| CFG-11 | Phase 9 | Pending |
+| GIT-01 | Phase 4 | Pending |
+| GIT-02 | Phase 4 | Pending |
+| GIT-03 | Phase 4 | Pending |
+| GIT-04 | Phase 4 | Pending |
+| GIT-05 | Phase 4 | Pending |
+| GIT-06 | Phase 4 | Pending |
+| GIT-07 | Phase 4 | Pending |
+| EXEC-01 | Phase 5 | Pending |
+| EXEC-02 | Phase 5 | Pending |
+| EXEC-03 | Phase 5 | Pending |
+| EXEC-04 | Phase 7 | Pending |
+| EXEC-05 | Phase 5 | Pending |
+| EXEC-06 | Phase 5 | Pending |
+| EXEC-07 | Phase 5 | Pending |
+| CLI-01 | Phase 6 | Pending |
+| CLI-02 | Phase 6 | Pending |
+| CLI-03 | Phase 6 | Pending |
+| UI-01 | Phase 8 | Pending |
+| UI-02 | Phase 8 | Pending |
+| UI-03 | Phase 8 | Pending |
+| UI-04 | Phase 8 | Pending |
+| UI-05 | Phase 8 | Pending |
+| ERR-01 | Phase 1 | Pending |
+| ERR-02 | Phase 7 | Pending |
+| ERR-03 | Phase 7 | Pending |
 
 **Coverage:**
 - v1 requirements: 36 total
-- Mapped to phases: 0
-- Unmapped: 36
+- Mapped to phases: 36
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-04-09*
-*Last updated: 2026-04-09 after initial definition*
+*Last updated: 2026-04-09 after roadmap creation — all 36 requirements mapped to phases 1-9*
