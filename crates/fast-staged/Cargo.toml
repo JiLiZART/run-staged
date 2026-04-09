@@ -1,6 +1,20 @@
 [package]
-name = "cli"
+name    = "fast-staged"
 version = "0.1.0"
 edition = "2024"
 
+[[bin]]
+name = "fast-staged"
+path = "src/main.rs"
+
 [dependencies]
+clap           = { version = "4", features = ["derive"] }
+gix            = "0.81"
+globset        = "0.4"
+parse_duration = "2"
+ratatui        = "0.30"
+serde          = { version = "1", features = ["derive"] }
+serde_json     = "1"
+thiserror      = "2"
+tokio          = { version = "1", features = ["full"] }
+toml           = "1"
