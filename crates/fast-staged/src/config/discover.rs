@@ -63,14 +63,9 @@ fn parse_config_at(path: &Path, source: ConfigSource) -> Result<Config, AppError
         let content = std::fs::read_to_string(path).map_err(AppError::Io)?;
         let pkg: serde_json::Value = serde_json::from_str(&content)
             .map_err(|e| AppError::ConfigInvalid(format!("{}: {}", path.display(), e)))?;
-        let fs_value = pkg
-            .get("fast-staged")
-            .ok_or_else(|| {
-                AppError::ConfigInvalid(format!(
-                    "{}: missing 'fast-staged' key",
-                    path.display()
-                ))
-            })?;
+        let fs_value = pkg.get("fast-staged").ok_or_else(|| {
+            AppError::ConfigInvalid(format!("{}: missing 'fast-staged' key", path.display()))
+        })?;
         parse_json::parse_package_json_value(fs_value.clone(), source)
     } else if filename.ends_with(".toml") {
         let mut config = parse_toml::parse_toml_file(path)?;
@@ -278,7 +273,11 @@ mod tests {
         let dir = make_temp_dir("t09");
         make_git_root(&dir);
         let path = dir.join("myconfig.toml");
-        write_file(&path.parent().unwrap(), "myconfig.toml", "[patterns]\n\"*.rs\" = [\"cargo fmt\"]\n");
+        write_file(
+            &path.parent().unwrap(),
+            "myconfig.toml",
+            "[patterns]\n\"*.rs\" = [\"cargo fmt\"]\n",
+        );
         let config = load_config(Some(&path)).unwrap();
         assert!(
             matches!(config.source, ConfigSource::Explicit(_)),
