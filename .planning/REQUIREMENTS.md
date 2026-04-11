@@ -21,13 +21,13 @@
 
 ### Git Integration
 
-- [ ] **GIT-01**: Tool detects staged files from git index via gix
+- [x] **GIT-01**: Tool detects staged files from git index via gix
 - [ ] **GIT-02**: Tool saves staged diff to .git/fast-staged.patch before command execution
 - [ ] **GIT-03**: Tool restores staged diff from patch on command failure
 - [ ] **GIT-04**: Tool cleans up patch file after successful execution
-- [ ] **GIT-05**: Tool supports --unstaged flag to run on modified (not staged) files
-- [ ] **GIT-06**: Tool exits with clear error when not in a git repository
-- [ ] **GIT-07**: Tool exits with clear error when no staged files found (unless --allow-empty)
+- [x] **GIT-05**: Tool supports --unstaged flag to run on modified (not staged) files
+- [x] **GIT-06**: Tool exits with clear error when not in a git repository
+- [x] **GIT-07**: Tool exits with clear error when no staged files found (unless --allow-empty)
 
 ### Command Execution
 
@@ -98,13 +98,13 @@
 | CFG-09 | Phase 3 | Complete |
 | CFG-10 | Phase 9 | Pending |
 | CFG-11 | Phase 9 | Pending |
-| GIT-01 | Phase 4 | Pending |
+| GIT-01 | Phase 4 | Complete |
 | GIT-02 | Phase 4 | Pending |
 | GIT-03 | Phase 4 | Pending |
 | GIT-04 | Phase 4 | Pending |
-| GIT-05 | Phase 4 | Pending |
-| GIT-06 | Phase 4 | Pending |
-| GIT-07 | Phase 4 | Pending |
+| GIT-05 | Phase 4 | Complete |
+| GIT-06 | Phase 4 | Complete |
+| GIT-07 | Phase 4 | Complete |
 | EXEC-01 | Phase 5 | Pending |
 | EXEC-02 | Phase 5 | Pending |
 | EXEC-03 | Phase 5 | Pending |

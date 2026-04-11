@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: Ready to plan
-stopped_at: Phase 4 context gathered
-last_updated: "2026-04-09T22:39:24.433Z"
+status: Ready to execute
+stopped_at: Completed 04-01-PLAN.md
+last_updated: "2026-04-11T19:01:54.512Z"
 progress:
   total_phases: 9
   completed_phases: 3
-  total_plans: 4
-  completed_plans: 4
+  total_plans: 6
+  completed_plans: 5
 ---
 
 # Project State
@@ -19,12 +19,12 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-09)
 
 **Core value:** Run linting/formatting commands on staged files faster than lint-staged, with zero Node.js runtime dependency.
-**Current focus:** Phase 03 — advanced-config
+**Current focus:** Phase 04 — git-integration
 
 ## Current Position
 
-Phase: 4
-Plan: Not started
+Phase: 04 (git-integration) — EXECUTING
+Plan: 2 of 2
 
 ## Performance Metrics
 
@@ -50,6 +50,7 @@ Plan: Not started
 | Phase 02-config-core P01 | 7 | 2 tasks | 6 files |
 | Phase 02-config-core P02 | 12 | 2 tasks | 4 files |
 | Phase 03-advanced-config P01 | 25 | 2 tasks | 4 files |
+| Phase 04-git-integration P01 | 426 | 1 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -70,6 +71,9 @@ Recent decisions affecting current work:
 - [Phase 02-config-core]: Integration tests create .git/ in each temp dir to isolate walk from real project tree
 - [Phase 03-advanced-config]: Enable preserve_order on toml+serde_json crates for declaration-order group iteration without sort()
 - [Phase 03-advanced-config]: JSON parser fallback: named-groups-only configs fall through to structured parse, not error
+- [Phase 04-git-integration]: Use open_index() not index() for staged_files — fresh read required for pre-commit hook context
+- [Phase 04-git-integration]: open_index() failure maps to NoStagedFiles — handles fresh repos with no index file
+- [Phase 04-git-integration]: CWD-mutating tests serialised with static Mutex — gix::discover uses CWD globally
 
 ### Pending Todos
 
@@ -83,6 +87,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-09T22:39:24.389Z
-Stopped at: Phase 4 context gathered
-Resume file: .planning/phases/04-git-integration/04-CONTEXT.md
+Last session: 2026-04-11T19:01:54.468Z
+Stopped at: Completed 04-01-PLAN.md
+Resume file: None
