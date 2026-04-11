@@ -60,6 +60,88 @@ impl GitContext {
         Ok(files)
     }
 
+    /// Save the current staged diff to `.git/fast-staged.patch`.
+    ///
+    /// The patch captures the HEAD-vs-index diff so the staged state can be
+    /// restored if a linter or formatter corrupts the index.  Any existing
+    /// patch file is overwritten (D-07).
+    ///
+    /// Note: gix has no unified-diff generator that covers the HEAD-vs-index
+    /// case without significant blob-level assembly (research open question 4).
+    /// We use `git diff --cached` as a pragmatic fallback here — the only
+    /// documented exception to the "no git CLI" constraint for backup.
+    pub fn backup(&self) -> Result<(), AppError> {
+        let patch_path = self.repo.git_dir().join("fast-staged.patch");
+
+        // Work-dir is needed so `git` finds the right repo.
+        let work_dir = self
+            .repo
+            .workdir()
+            .ok_or_else(|| AppError::Git("bare repositories are not supported".to_string()))?;
+
+        let output = std::process::Command::new("git")
+            .args(["diff", "--cached"])
+            .current_dir(work_dir)
+            .output()
+            .map_err(|e| AppError::Git(format!("git diff --cached failed: {e}")))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(AppError::Git(format!("git diff --cached failed: {stderr}")));
+        }
+
+        // Write patch — overwrites any existing file (D-07).
+        std::fs::write(&patch_path, &output.stdout)?;
+        Ok(())
+    }
+
+    /// Restore the staged diff from `.git/fast-staged.patch`.
+    ///
+    /// If no patch file exists (e.g. backup was never called or cleanup already
+    /// ran) this is a no-op.  gix has no `git apply` equivalent; we shell out
+    /// to `git apply --cached` — the documented exception for restore (research
+    /// Pattern 4).
+    pub fn restore(&self) -> Result<(), AppError> {
+        let patch_path = self.repo.git_dir().join("fast-staged.patch");
+        if !patch_path.exists() {
+            return Ok(());
+        }
+
+        let work_dir = self
+            .repo
+            .workdir()
+            .ok_or_else(|| AppError::Git("bare repositories are not supported".to_string()))?;
+
+        let output = std::process::Command::new("git")
+            .args(["apply", "--cached"])
+            .arg(&patch_path)
+            .current_dir(work_dir)
+            .output()
+            .map_err(|e| AppError::Git(format!("git apply --cached failed: {e}")))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(AppError::Git(format!(
+                "git apply --cached failed: {stderr}"
+            )));
+        }
+
+        Ok(())
+    }
+
+    /// Remove `.git/fast-staged.patch` if it exists.
+    ///
+    /// Called after a successful run (GIT-04).  Silently succeeds if the patch
+    /// file does not exist (e.g. cleanup was already called or backup was
+    /// never called).
+    pub fn cleanup(&self) -> Result<(), AppError> {
+        let patch_path = self.repo.git_dir().join("fast-staged.patch");
+        if patch_path.exists() {
+            std::fs::remove_file(&patch_path)?;
+        }
+        Ok(())
+    }
+
     /// Return the list of modified-but-not-staged files (index vs worktree).
     ///
     /// An empty result is valid — no error is returned when nothing is unstaged.
@@ -329,6 +411,235 @@ mod tests {
             names.contains(&"tracked.txt".to_string()),
             "expected tracked.txt in unstaged files, got {:?}",
             names
+        );
+
+        std::env::set_current_dir(prev).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // -------------------------------------------------------------------------
+    // backup() tests
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_backup_creates_patch_file() {
+        let _lock = CWD_LOCK.lock().unwrap();
+        let dir = make_real_git_repo("backup-creates");
+        // Commit a file first, then modify and re-stage it so there is a diff.
+        stage_file(&dir, "hello.txt", "original");
+        commit_all(&dir, "initial");
+        stage_file(&dir, "hello.txt", "modified");
+
+        let prev = std::env::current_dir().unwrap();
+        std::env::set_current_dir(&dir).unwrap();
+
+        let ctx = GitContext::open().unwrap();
+        ctx.backup().unwrap();
+
+        let patch_path = dir.join(".git").join("fast-staged.patch");
+        assert!(
+            patch_path.exists(),
+            "patch file should exist after backup()"
+        );
+
+        std::env::set_current_dir(prev).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_backup_patch_is_nonempty_for_staged_changes() {
+        let _lock = CWD_LOCK.lock().unwrap();
+        let dir = make_real_git_repo("backup-nonempty");
+        stage_file(&dir, "file.txt", "line one\n");
+        commit_all(&dir, "initial");
+        stage_file(&dir, "file.txt", "line one\nline two\n");
+
+        let prev = std::env::current_dir().unwrap();
+        std::env::set_current_dir(&dir).unwrap();
+
+        let ctx = GitContext::open().unwrap();
+        ctx.backup().unwrap();
+
+        let patch_path = dir.join(".git").join("fast-staged.patch");
+        let content = std::fs::read_to_string(&patch_path).unwrap();
+        assert!(
+            !content.is_empty(),
+            "patch should be non-empty when there are staged changes"
+        );
+        assert!(
+            content.contains("line two"),
+            "patch should contain the new line, got: {content}"
+        );
+
+        std::env::set_current_dir(prev).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_backup_overwrites_stale_patch() {
+        let _lock = CWD_LOCK.lock().unwrap();
+        let dir = make_real_git_repo("backup-overwrite");
+        stage_file(&dir, "data.txt", "v1\n");
+        commit_all(&dir, "initial");
+        stage_file(&dir, "data.txt", "v2\n");
+
+        // Write a stale patch file.
+        let patch_path = dir.join(".git").join("fast-staged.patch");
+        std::fs::write(&patch_path, b"stale content").unwrap();
+
+        let prev = std::env::current_dir().unwrap();
+        std::env::set_current_dir(&dir).unwrap();
+
+        let ctx = GitContext::open().unwrap();
+        ctx.backup().unwrap();
+
+        let content = std::fs::read_to_string(&patch_path).unwrap();
+        assert_ne!(
+            content, "stale content",
+            "backup() should overwrite the old patch file"
+        );
+        assert!(
+            content.contains("v2") || !content.contains("stale"),
+            "patch should reflect current staged diff, got: {content}"
+        );
+
+        std::env::set_current_dir(prev).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_backup_on_unborn_head_succeeds() {
+        let _lock = CWD_LOCK.lock().unwrap();
+        // Fresh repo with no commits — unborn HEAD.
+        let dir = make_real_git_repo("backup-unborn");
+        stage_file(&dir, "new.txt", "brand new file\n");
+
+        let prev = std::env::current_dir().unwrap();
+        std::env::set_current_dir(&dir).unwrap();
+
+        let ctx = GitContext::open().unwrap();
+        // Should succeed even with no prior commits (Pitfall 5).
+        ctx.backup().unwrap();
+
+        let patch_path = dir.join(".git").join("fast-staged.patch");
+        assert!(
+            patch_path.exists(),
+            "patch file should be created even for unborn HEAD"
+        );
+
+        std::env::set_current_dir(prev).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // -------------------------------------------------------------------------
+    // restore() tests
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_restore_applies_patch_to_index() {
+        let _lock = CWD_LOCK.lock().unwrap();
+        let dir = make_real_git_repo("restore-applies");
+        // Commit original, then stage a modification.
+        stage_file(&dir, "restore.txt", "original\n");
+        commit_all(&dir, "initial");
+        stage_file(&dir, "restore.txt", "modified\n");
+
+        let prev = std::env::current_dir().unwrap();
+        std::env::set_current_dir(&dir).unwrap();
+
+        let ctx = GitContext::open().unwrap();
+        // Save the staged diff.
+        ctx.backup().unwrap();
+
+        // Reset the index so no staged changes remain.
+        let out = std::process::Command::new("git")
+            .args(["reset", "HEAD"])
+            .current_dir(&dir)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "git reset HEAD failed");
+
+        // Restore should re-apply the staged diff.
+        ctx.restore().unwrap();
+
+        // Check that the staged diff is back.
+        let diff_out = std::process::Command::new("git")
+            .args(["diff", "--cached"])
+            .current_dir(&dir)
+            .output()
+            .unwrap();
+        let diff_text = String::from_utf8_lossy(&diff_out.stdout);
+        assert!(
+            diff_text.contains("modified"),
+            "restore() should re-stage the original diff, got: {diff_text}"
+        );
+
+        std::env::set_current_dir(prev).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_restore_noop_when_no_patch_exists() {
+        let _lock = CWD_LOCK.lock().unwrap();
+        let dir = make_real_git_repo("restore-noop");
+
+        let prev = std::env::current_dir().unwrap();
+        std::env::set_current_dir(&dir).unwrap();
+
+        let ctx = GitContext::open().unwrap();
+        // No patch file exists — restore() should succeed silently.
+        let result = ctx.restore();
+        assert!(
+            result.is_ok(),
+            "restore() should succeed when no patch file exists"
+        );
+
+        std::env::set_current_dir(prev).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // -------------------------------------------------------------------------
+    // cleanup() tests
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_cleanup_removes_patch_file() {
+        let _lock = CWD_LOCK.lock().unwrap();
+        let dir = make_real_git_repo("cleanup-removes");
+
+        // Create a patch file manually.
+        let patch_path = dir.join(".git").join("fast-staged.patch");
+        std::fs::write(&patch_path, b"some patch content").unwrap();
+
+        let prev = std::env::current_dir().unwrap();
+        std::env::set_current_dir(&dir).unwrap();
+
+        let ctx = GitContext::open().unwrap();
+        ctx.cleanup().unwrap();
+
+        assert!(
+            !patch_path.exists(),
+            "cleanup() should remove the patch file"
+        );
+
+        std::env::set_current_dir(prev).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_cleanup_noop_when_no_patch_exists() {
+        let _lock = CWD_LOCK.lock().unwrap();
+        let dir = make_real_git_repo("cleanup-noop");
+
+        let prev = std::env::current_dir().unwrap();
+        std::env::set_current_dir(&dir).unwrap();
+
+        let ctx = GitContext::open().unwrap();
+        // No patch file — cleanup() should succeed silently.
+        let result = ctx.cleanup();
+        assert!(
+            result.is_ok(),
+            "cleanup() should succeed when no patch file exists"
         );
 
         std::env::set_current_dir(prev).unwrap();
