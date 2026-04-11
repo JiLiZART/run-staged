@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: Ready to execute
-stopped_at: Completed 04-01-PLAN.md
-last_updated: "2026-04-11T19:01:54.512Z"
+status: Phase complete — ready for verification
+stopped_at: Completed 04-02-PLAN.md
+last_updated: "2026-04-11T19:09:45.483Z"
 progress:
   total_phases: 9
-  completed_phases: 3
+  completed_phases: 4
   total_plans: 6
-  completed_plans: 5
+  completed_plans: 6
 ---
 
 # Project State
@@ -51,6 +51,7 @@ Plan: 2 of 2
 | Phase 02-config-core P02 | 12 | 2 tasks | 4 files |
 | Phase 03-advanced-config P01 | 25 | 2 tasks | 4 files |
 | Phase 04-git-integration P01 | 426 | 1 tasks | 2 files |
+| Phase 04-git-integration P02 | 8 | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -74,6 +75,8 @@ Recent decisions affecting current work:
 - [Phase 04-git-integration]: Use open_index() not index() for staged_files — fresh read required for pre-commit hook context
 - [Phase 04-git-integration]: open_index() failure maps to NoStagedFiles — handles fresh repos with no index file
 - [Phase 04-git-integration]: CWD-mutating tests serialised with static Mutex — gix::discover uses CWD globally
+- [Phase 04-git-integration]: backup() uses git diff --cached shell-out — gix blob-level diff requires complex assembly; fallback explicitly allowed by research
+- [Phase 04-git-integration]: Integration tests migrated to real git repos — make_real_git_repo replaces fake .git/ stubs for gix open_index() compatibility
 
 ### Pending Todos
 
@@ -87,6 +90,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-11T19:01:54.468Z
-Stopped at: Completed 04-01-PLAN.md
+Last session: 2026-04-11T19:09:45.440Z
+Stopped at: Completed 04-02-PLAN.md
 Resume file: None

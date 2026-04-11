@@ -15,7 +15,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 1: Foundation** - Typed error enum, Cargo deps, CI fix, and correct exit code wiring (completed 2026-04-09)
 - [ ] **Phase 2: Config Core** - Multi-format config discovery and parsing (TOML, JSON, package.json)
 - [x] **Phase 3: Advanced Config** - Named groups with per-group timeout, execution order, and error settings (completed 2026-04-09)
-- [ ] **Phase 4: Git Integration** - Staged file detection via gix plus patch backup and restore
+- [x] **Phase 4: Git Integration** - Staged file detection via gix plus patch backup and restore (completed 2026-04-11)
 - [ ] **Phase 5: Execution Core** - Glob matching, parallel and sequential command execution, timeouts
 - [ ] **Phase 6: CLI Interface** - Full clap argument parsing, --version, and --help
 - [ ] **Phase 7: Signal Handling & Resilience** - Ctrl+C with child process cleanup, terminal restore, user-friendly errors
@@ -151,7 +151,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 | 1. Foundation | 1/1 | Complete   | 2026-04-09 |
 | 2. Config Core | 1/2 | In Progress|  |
 | 3. Advanced Config | 1/1 | Complete   | 2026-04-09 |
-| 4. Git Integration | 1/2 | In Progress|  |
+| 4. Git Integration | 2/2 | Complete   | 2026-04-11 |
 | 5. Execution Core | 0/TBD | Not started | - |
 | 6. CLI Interface | 0/TBD | Not started | - |
 | 7. Signal Handling & Resilience | 0/TBD | Not started | - |
