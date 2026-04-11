@@ -1,5 +1,6 @@
 pub mod config;
 mod error;
+pub mod git;
 pub use error::AppError;
 
 pub async fn run() -> Result<(), AppError> {
