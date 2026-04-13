@@ -80,7 +80,12 @@ Plans:
   5. `--unstaged` flag causes the tool to operate on modified-but-unstaged files instead
   6. Running outside a git repo prints a clear error and exits non-zero
   7. Running with no staged files (and without `--allow-empty`) exits with a clear message and non-zero code
-**Plans**: TBD
+**Plans:** 3 plans
+
+Plans:
+- [x] 04-01-PLAN.md — GitContext with open, staged_files, unstaged_files
+- [x] 04-02-PLAN.md — Backup/restore/cleanup pipeline wired into run()
+- [ ] 04-03-PLAN.md — Wire --unstaged flag (gap closure for GIT-05)
 
 ### Phase 5: Execution Core
 **Goal**: Users can run configured commands against matched staged files in parallel with correct exit code propagation
@@ -93,7 +98,12 @@ Plans:
   4. A command that exceeds its configured timeout is killed and the tool reports the timeout
   5. Staged files are matched to command groups using glob patterns with matchBase semantics (`*.ts` matches files in any subdirectory)
   6. When `--allow-empty` is set and no files match any pattern, the tool exits 0 silently
-**Plans**: TBD
+**Plans:** 3 plans
+
+Plans:
+- [x] 04-01-PLAN.md — GitContext with open, staged_files, unstaged_files
+- [x] 04-02-PLAN.md — Backup/restore/cleanup pipeline wired into run()
+- [ ] 04-03-PLAN.md — Wire --unstaged flag (gap closure for GIT-05)
 
 ### Phase 6: CLI Interface
 **Goal**: Users can invoke the tool with standard flags and get expected Unix CLI behavior
@@ -104,7 +114,12 @@ Plans:
   2. `fast-staged --version` prints the semver version and exits 0
   3. `fast-staged --help` prints usage, available flags, and exits 0
   4. `--quiet`, `--unstaged`, and `--allow-empty` flags are accepted and forwarded to runtime behavior
-**Plans**: TBD
+**Plans:** 3 plans
+
+Plans:
+- [x] 04-01-PLAN.md — GitContext with open, staged_files, unstaged_files
+- [x] 04-02-PLAN.md — Backup/restore/cleanup pipeline wired into run()
+- [ ] 04-03-PLAN.md — Wire --unstaged flag (gap closure for GIT-05)
 
 ### Phase 7: Signal Handling & Resilience
 **Goal**: Users can safely interrupt the tool at any time without orphaned processes or a corrupted terminal
@@ -115,7 +130,12 @@ Plans:
   2. After Ctrl+C, no zombie or orphaned processes remain
   3. Any AppError printed to stderr includes a human-readable message and an actionable hint (e.g., "staged diff not found — run git add first")
   4. A panic inside the ratatui render loop restores the terminal to normal mode before the process exits
-**Plans**: TBD
+**Plans:** 3 plans
+
+Plans:
+- [x] 04-01-PLAN.md — GitContext with open, staged_files, unstaged_files
+- [x] 04-02-PLAN.md — Backup/restore/cleanup pipeline wired into run()
+- [ ] 04-03-PLAN.md — Wire --unstaged flag (gap closure for GIT-05)
 **UI hint**: yes
 
 ### Phase 8: TUI Layer
@@ -128,7 +148,12 @@ Plans:
   3. Commands are grouped by their config group name in the TUI
   4. `--quiet` flag produces plain text output (pass/fail lines) with no TUI rendering
   5. When stdout is not a TTY (e.g., piped to a file or run in CI), the tool automatically falls back to quiet text output
-**Plans**: TBD
+**Plans:** 3 plans
+
+Plans:
+- [x] 04-01-PLAN.md — GitContext with open, staged_files, unstaged_files
+- [x] 04-02-PLAN.md — Backup/restore/cleanup pipeline wired into run()
+- [ ] 04-03-PLAN.md — Wire --unstaged flag (gap closure for GIT-05)
 **UI hint**: yes
 
 ### Phase 9: Lint-staged Compatibility
@@ -139,7 +164,12 @@ Plans:
   1. A `.lintstagedrc.json` or `.lintstagedrc.yml` file is discovered and parsed as a valid config
   2. A lint-staged config using JS function values prints a clear error explaining JS functions are not supported and suggests converting to a static config
   3. All other lint-staged JSON/YAML config shapes (string commands, array commands) execute correctly
-**Plans**: TBD
+**Plans:** 3 plans
+
+Plans:
+- [x] 04-01-PLAN.md — GitContext with open, staged_files, unstaged_files
+- [x] 04-02-PLAN.md — Backup/restore/cleanup pipeline wired into run()
+- [ ] 04-03-PLAN.md — Wire --unstaged flag (gap closure for GIT-05)
 
 ## Progress
 
@@ -151,7 +181,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 | 1. Foundation | 1/1 | Complete   | 2026-04-09 |
 | 2. Config Core | 1/2 | In Progress|  |
 | 3. Advanced Config | 1/1 | Complete   | 2026-04-09 |
-| 4. Git Integration | 2/2 | Complete   | 2026-04-11 |
+| 4. Git Integration | 2/3 | In Progress | - |
 | 5. Execution Core | 0/TBD | Not started | - |
 | 6. CLI Interface | 0/TBD | Not started | - |
 | 7. Signal Handling & Resilience | 0/TBD | Not started | - |
