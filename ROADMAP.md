@@ -45,7 +45,8 @@ A CLI tool (inspired by nano-staged and lint-staged) to run commands for defined
 [ ] Add support to backup staged files before tasks run as patch file in .git/fast-staged.diff and delete file after
 [ ] Add files chunking support, if in config set that not need to run program on each file need to create a chunk of files and pass files chunk on program run like `eslint file1.js file2.js` and for second chunk `eslint file3.js file4.js`
 [ ] Display running commands by groups when running for example
-
+[ ] Add ability to define mutable or readonly group (for readoly means that commands dont modify files)
+ 
 ```
   - group1
     (*.js, *.ts) - file1.js
