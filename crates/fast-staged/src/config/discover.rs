@@ -274,7 +274,7 @@ mod tests {
         make_git_root(&dir);
         let path = dir.join("myconfig.toml");
         write_file(
-            &path.parent().unwrap(),
+            path.parent().unwrap(),
             "myconfig.toml",
             "[patterns]\n\"*.rs\" = [\"cargo fmt\"]\n",
         );
