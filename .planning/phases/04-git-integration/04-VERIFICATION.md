@@ -1,33 +1,23 @@
 ---
 phase: 04-git-integration
-verified: 2026-04-10T00:00:00Z
-status: gaps_found
-score: 6/7 must-haves verified
-re_verification: false
-gaps:
-  - truth: "--unstaged flag causes the tool to operate on modified-but-unstaged files instead"
-    status: failed
-    reason: "unstaged_files() method exists on GitContext but is never called from run(). No --unstaged CLI flag is declared or forwarded. The capability is implemented at the library layer but not wired to any user-facing entry point."
-    artifacts:
-      - path: "crates/fast-staged/src/lib.rs"
-        issue: "run() never calls git_ctx.unstaged_files(); no branch on a --unstaged flag"
-      - path: "crates/fast-staged/src/main.rs"
-        issue: "No CLI flag parsing — main() calls run() with no arguments"
-    missing:
-      - "A --unstaged flag accepted by main() (or run()) that selects unstaged_files() instead of staged_files()"
-      - "run() conditional logic: if unstaged flag then use unstaged_files(), else use staged_files()"
-human_verification:
-  - test: "Run binary with --unstaged flag"
-    expected: "Tool lists modified-but-not-staged files instead of staged files"
-    why_human: "CLI flag does not exist yet; cannot test programmatically"
+verified: 2026-04-24T00:00:00Z
+status: passed
+score: 7/7 must-haves verified
+re_verification:
+  previous_status: gaps_found
+  previous_score: 6/7
+  gaps_closed:
+    - "--unstaged flag causes the tool to operate on modified-but-unstaged files instead"
+  gaps_remaining: []
+  regressions: []
 ---
 
 # Phase 4: Git Integration Verification Report
 
 **Phase Goal:** Users can trust that the tool sees exactly the right staged files and that their index is safe if a command fails
-**Verified:** 2026-04-10
-**Status:** gaps_found
-**Re-verification:** No — initial verification
+**Verified:** 2026-04-24
+**Status:** passed
+**Re-verification:** Yes — after GIT-05 gap closure (plan 04-03)
 
 ## Goal Achievement
 
@@ -35,93 +25,97 @@ human_verification:
 
 | # | Truth | Status | Evidence |
 |---|-------|--------|----------|
-| 1 | Running the tool lists staged files read directly from the git index (no shell-out to git) | VERIFIED | `staged_files()` uses `gix::open_index()` + index entry iteration; no Command spawn for file listing |
-| 2 | A `.git/fast-staged.patch` file is created before any command runs | VERIFIED | `backup()` calls `git diff --cached` shell-out, writes to `repo.git_dir().join("fast-staged.patch")`; `run()` calls `git_ctx.backup()?` before future execution step |
-| 3 | If a command fails, the staged diff is restored from the patch | VERIFIED (partial) | `restore()` is fully implemented and tested; not yet called on failure in `run()` (Phase 5 wiring, documented as comment in lib.rs) |
-| 4 | After successful execution, the patch file is deleted | VERIFIED | `cleanup()` implemented; `run()` calls `git_ctx.cleanup()?` at end of success path |
-| 5 | `--unstaged` flag causes the tool to operate on modified-but-unstaged files instead | FAILED | `unstaged_files()` method exists and passes tests, but no CLI flag, and `run()` never calls it |
-| 6 | Running outside a git repo prints a clear error and exits non-zero | VERIFIED | `open()` maps all `gix::discover` errors to `AppError::NotGitRepository`; `main.rs` prints error and exits 1 |
-| 7 | Running with no staged files exits with a clear message and non-zero code | VERIFIED | `staged_files()` returns `AppError::NoStagedFiles` when index is empty; integration test `test_binary_exits_nonzero_with_no_staged_files` passes |
+| 1 | Running the tool lists staged files read directly from the git index (no shell-out to git) | VERIFIED | `staged_files()` uses `self.repo.open_index()` + `entries()` iterator with `Stage::Unconflicted` filter (git.rs:39-54). No `Command::new("git")` for file listing. |
+| 2 | A `.git/fast-staged.patch` file is created before any command runs | VERIFIED | `backup()` writes `self.repo.git_dir().join("fast-staged.patch")` (git.rs:74, 94); `lib.rs::run()` calls `git_ctx.backup()?` at line 25 before future execution step |
+| 3 | If a command fails, the staged diff is restored from the patch | VERIFIED (partial) | `restore()` fully implemented (git.rs:104-130) via `git apply --cached`; 2 unit tests pass. Call-on-failure wiring is documented deferred to Phase 5 (lib.rs:54 comment) — execution logic doesn't exist yet to fail from. |
+| 4 | After successful execution, the patch file is deleted | VERIFIED | `cleanup()` uses `remove_file` when patch exists (git.rs:137-143); `lib.rs::run()` calls `git_ctx.cleanup()?` at line 51 on success path |
+| 5 | `--unstaged` flag causes the tool to operate on modified-but-unstaged files instead | VERIFIED | `main.rs:6` detects `--unstaged` via `std::env::args().any(|a| a == "--unstaged")`; `main.rs:7` passes bool to `fast_staged::run(unstaged)`; `lib.rs:16-20` branches to `git_ctx.unstaged_files()` when flag is true. Integration test `test_binary_with_unstaged_flag_shows_unstaged_files` confirms end-to-end flow. |
+| 6 | Running outside a git repo prints a clear error and exits non-zero | VERIFIED | `open()` maps all `gix::discover` errors to `AppError::NotGitRepository` (git.rs:20); `main.rs:8` prints `error: {e}` and `process::exit(1)`. Unit test `test_open_fails_outside_git_repo` confirms error variant. |
+| 7 | Running with no staged files exits with a clear message and non-zero code | VERIFIED | `staged_files()` returns `AppError::NoStagedFiles` when empty (git.rs:57); integration test `test_binary_exits_nonzero_with_no_staged_files` passes. `--allow-empty` not required by Phase 4 (Phase 5/6 work). |
 
-**Score:** 6/7 truths verified (1 failed)
+**Score:** 7/7 truths verified
 
 ### Required Artifacts
 
 | Artifact | Expected | Status | Details |
 |----------|----------|--------|---------|
-| `crates/fast-staged/src/git.rs` | GitContext with open, staged_files, unstaged_files, backup, restore, cleanup | VERIFIED | 172 lines of production code + 474 lines of tests; all 7 methods present and substantive |
-| `crates/fast-staged/src/lib.rs` | Git pipeline wired into run() | VERIFIED | `pub mod git;` declared; `run()` calls open -> staged_files -> backup -> cleanup |
-| `crates/fast-staged/tests/integration_test.rs` | Real git repos, no fake .git stubs | VERIFIED | `make_real_git_repo()` runs `git init`; 5 integration tests all use real repos |
+| `crates/fast-staged/src/git.rs` | GitContext with open, staged_files, unstaged_files, backup, restore, cleanup | VERIFIED | 172 lines prod + ~475 lines tests; all 7 methods present and substantive; 15 unit tests |
+| `crates/fast-staged/src/lib.rs` | Git pipeline wired into run() with unstaged branch | VERIFIED | `pub mod git;` (line 3); `run(unstaged: bool)` signature (line 6); branches `unstaged_files()` vs `staged_files()` (lines 16-20); conditional backup/cleanup (lines 24, 50) |
+| `crates/fast-staged/src/main.rs` | --unstaged flag parsing, pass-through to run() | VERIFIED | Line 6: `std::env::args().any(...)`; Line 7: `fast_staged::run(unstaged).await` |
+| `crates/fast-staged/tests/integration_test.rs` | Real git repos, --unstaged coverage | VERIFIED | 7 integration tests including `test_binary_with_unstaged_flag_shows_unstaged_files` (line 208) and `test_binary_without_unstaged_flag_shows_staged_files` (line 256); all use `make_real_git_repo` with `git init` |
 
 ### Key Link Verification
 
 | From | To | Via | Status | Details |
 |------|----|-----|--------|---------|
-| `git.rs` | `error.rs` | `AppError::NotGitRepository, AppError::NoStagedFiles, AppError::Git` | WIRED | All three variants used; `use crate::AppError` at top of git.rs |
-| `git.rs` | `.git/fast-staged.patch` | `std::fs::write` in backup(), `std::fs::remove_file` in cleanup() | WIRED | `"fast-staged.patch"` string in both methods; file write and delete verified |
-| `git.rs` | `git apply --cached` | `std::process::Command` in restore() | WIRED | `Command::new("git").args(["apply", "--cached"])` at line 115 |
-| `lib.rs` | `git.rs` | `git::GitContext::open()` and method calls | WIRED | `pub mod git;` declared; `git::GitContext::open()`, `git_ctx.staged_files()`, `git_ctx.backup()`, `git_ctx.cleanup()` all present |
-| `lib.rs` | `git.rs` | `git_ctx.unstaged_files()` | NOT WIRED | `unstaged_files()` exists in git.rs but is never called from lib.rs |
+| `git.rs` | `error.rs` | `AppError::{NotGitRepository, NoStagedFiles, Git}` | WIRED | `use crate::AppError;` (line 6); all three variants referenced |
+| `git.rs` | `.git/fast-staged.patch` | `std::fs::write` / `std::fs::remove_file` | WIRED | `git_dir().join("fast-staged.patch")` in backup/restore/cleanup |
+| `git.rs` | `git apply --cached` | `std::process::Command` in restore() | WIRED | Lines 115-120; documented exception to no-git-CLI rule |
+| `git.rs` | `git diff --cached` | `std::process::Command` in backup() | WIRED | Lines 82-86; pragmatic fallback (gix lacks unified-diff for HEAD-vs-index) |
+| `lib.rs` | `git.rs` | `git::GitContext::open()` + method calls | WIRED | `pub mod git;`; `open()`, `staged_files()`, `unstaged_files()`, `backup()`, `cleanup()` all called |
+| `main.rs` | `lib.rs` | `fast_staged::run(unstaged)` | WIRED | Line 7 passes parsed bool |
+| `lib.rs` | `git.rs::unstaged_files` | Conditional branch on `unstaged` param | WIRED | Line 17: `git_ctx.unstaged_files()?` reached when flag set |
 
 ### Data-Flow Trace (Level 4)
 
 | Artifact | Data Variable | Source | Produces Real Data | Status |
 |----------|---------------|--------|--------------------|--------|
-| `lib.rs::run()` | `staged_files` | `git_ctx.staged_files()` -> `repo.open_index()` -> index entries | Yes — reads from real git index file on disk | FLOWING |
-| `git.rs::backup()` | patch content | `git diff --cached` stdout | Yes — live diff from git | FLOWING |
+| `lib.rs::run()` | `files` (staged branch) | `git_ctx.staged_files()` → `repo.open_index()` → index entries | Yes — reads on-disk `.git/index` | FLOWING |
+| `lib.rs::run()` | `files` (unstaged branch) | `git_ctx.unstaged_files()` → `repo.status()` IndexWorktree iterator | Yes — reads status platform with real worktree diff | FLOWING |
+| `git.rs::backup()` | patch bytes | `git diff --cached` stdout | Yes — live repo diff | FLOWING |
+| `main.rs` | `unstaged` bool | `std::env::args()` | Yes — real process argv | FLOWING |
 
 ### Behavioral Spot-Checks
 
 | Behavior | Command | Result | Status |
 |----------|---------|--------|--------|
-| 72 unit + integration tests pass | `cargo test` | 72 passed | PASS |
-| Clippy clean | `cargo clippy -- -D warnings` | No issues | PASS |
-| Format check | `cargo fmt -- --check` | Clean | PASS |
-| `--unstaged` flag wired | N/A — flag does not exist | Not implemented | FAIL |
+| Full test suite passes | `cargo test` | 74 passed (67 unit + 7 integration) | PASS |
+| Clippy clean at all-targets | `cargo clippy --all-targets -- -D warnings` | No warnings | PASS |
+| Format check clean | `cargo fmt -- --check` | Clean | PASS |
+| `--unstaged` flag flows to unstaged_files() | Integration test `test_binary_with_unstaged_flag_shows_unstaged_files` asserts on "Unstaged files" label in stderr | Present in test file line 208; full suite green | PASS |
+| Default path still lists staged files | `test_binary_without_unstaged_flag_shows_staged_files` (line 256) | Present; full suite green | PASS |
 
 ### Requirements Coverage
 
 | Requirement | Source Plan | Description | Status | Evidence |
 |-------------|------------|-------------|--------|----------|
-| GIT-01 | 04-01-PLAN.md | Staged files from git index via gix | SATISFIED | `staged_files()` uses `open_index()` + Stage::Unconflicted filter; test_staged_files_returns_both_staged_files passes |
-| GIT-02 | 04-02-PLAN.md | Saves staged diff to .git/fast-staged.patch before execution | SATISFIED | `backup()` creates patch; `run()` calls `git_ctx.backup()?` before future execution step |
-| GIT-03 | 04-02-PLAN.md | Restores staged diff from patch on command failure | PARTIAL | `restore()` fully implemented and unit-tested; restore-on-failure wiring deferred to Phase 5 (documented comment in lib.rs) |
-| GIT-04 | 04-02-PLAN.md | Cleans up patch file after successful execution | SATISFIED | `cleanup()` implemented; `run()` calls `git_ctx.cleanup()?` on success path |
-| GIT-05 | 04-01-PLAN.md | Tool supports --unstaged flag to operate on unstaged files | BLOCKED | `unstaged_files()` method exists and is tested, but no CLI flag exists and `run()` never calls it |
-| GIT-06 | 04-01-PLAN.md | Clear error when not in a git repository | SATISFIED | `AppError::NotGitRepository` returned by `open()`; integration test covers binary exit behavior |
-| GIT-07 | 04-01-PLAN.md | Clear error when no staged files (without --allow-empty) | SATISFIED | `AppError::NoStagedFiles` from `staged_files()`; integration test `test_binary_exits_nonzero_with_no_staged_files` passes |
+| GIT-01 | 04-01-PLAN.md | Staged files from git index via gix | SATISFIED | `staged_files()` uses `open_index()` + `Stage::Unconflicted` filter; test `test_staged_files_returns_both_staged_files` passes |
+| GIT-02 | 04-02-PLAN.md | Saves staged diff to `.git/fast-staged.patch` before execution | SATISFIED | `backup()` writes patch; `run()` calls it before future execution step |
+| GIT-03 | 04-02-PLAN.md | Restores staged diff from patch on command failure | PARTIAL | `restore()` fully implemented and unit-tested; on-failure invocation deferred to Phase 5 (no execution logic yet to fail from). This is a planned phase boundary documented in `lib.rs:54` — not an omission within Phase 4's scope. |
+| GIT-04 | 04-02-PLAN.md | Cleans up patch file after successful execution | SATISFIED | `cleanup()` implemented + called on success path in `run()` |
+| GIT-05 | 04-01-PLAN.md, 04-03-PLAN.md | `--unstaged` flag operates on modified (not staged) files | SATISFIED | Closed via plan 04-03 (commit `dc2b058`). `main.rs` parses flag, `lib.rs::run(unstaged)` branches correctly, integration test proves end-to-end behavior. |
+| GIT-06 | 04-01-PLAN.md | Clear error when not in a git repository | SATISFIED | `AppError::NotGitRepository` from `open()`; `main.rs` prints + exits 1 |
+| GIT-07 | 04-01-PLAN.md | Clear error when no staged files (unless `--allow-empty`) | SATISFIED | `AppError::NoStagedFiles` from `staged_files()`; integration test `test_binary_exits_nonzero_with_no_staged_files` passes. `--allow-empty` support is Phase 5/6 work. |
 
-**Notes on GIT-03:** `restore()` is implemented and all 8 backup/restore/cleanup unit tests pass. The on-failure call from `run()` is intentionally deferred to Phase 5 (execution core), with a comment in lib.rs. This is a planned gap, not an implementation omission.
-
-**Notes on GIT-05:** The ROADMAP.md Phase 4 Success Criterion 5 requires the `--unstaged` flag to be functional. Plan 04-01 narrowed the must_have truth to only `"unstaged_files() returns modified-but-not-staged files via status iterator"` — delivering the data layer but not the flag. The ROADMAP.md success criterion is the authoritative contract; the flag wiring is missing.
+**All 7 GIT-* requirements accounted for; no orphaned IDs.** Per `REQUIREMENTS.md` Traceability table, every GIT-0{1..7} is marked Complete for Phase 4 and has at least one source plan in this phase claiming it via `requirements:` frontmatter.
 
 ### Anti-Patterns Found
 
 | File | Line | Pattern | Severity | Impact |
 |------|------|---------|----------|--------|
-| `lib.rs` | 36 | Comment `// Note: On command failure (Phase 5), call git_ctx.restore()` | Info | Intentional deferred wiring, not a stub — restore() is fully implemented and tested |
+| `lib.rs` | 54 | Comment `// Note: On command failure (Phase 5), call git_ctx.restore()? then git_ctx.cleanup()?` | Info | Intentional deferred wiring, not a stub — `restore()` is fully implemented and tested; execution logic to fail from doesn't exist until Phase 5 |
+| `main.rs` | 5 | Comment `// Minimal flag detection — Phase 6 replaces this with full clap parsing.` | Info | Deliberate phase boundary, not a stub — flag detection works correctly for the one flag Phase 4 requires |
 
-No stubs detected in production code. All methods have substantive implementations verified against real git repos.
+No blocker or warning-level anti-patterns. No TODO/FIXME/PLACEHOLDER markers. No empty returns masquerading as implementations.
 
 ### Human Verification Required
 
-The following item requires human or CLI-level testing once the gap is resolved:
-
-#### 1. --unstaged Flag Behavior
-
-**Test:** Run `fast-staged --unstaged` in a git repo where a committed file has been modified but not staged
-**Expected:** Tool lists and operates on the modified-but-unstaged file instead of staged files
-**Why human:** The flag does not exist yet; cannot test programmatically
+None. All ROADMAP success criteria for Phase 4 are programmatically verified via unit and integration tests using real git repos.
 
 ### Gaps Summary
 
-One gap blocks full goal achievement: the `--unstaged` flag is not wired. The `unstaged_files()` method on `GitContext` is correctly implemented (reads the index-vs-worktree diff via gix status iterator) and passes 1 dedicated unit test. However, there is no mechanism for a user to invoke this behavior: `main.rs` parses no arguments, and `run()` does not accept a flag parameter.
+No gaps. The previously-flagged GIT-05 gap (--unstaged flag not wired) is closed:
 
-The ROADMAP.md Phase 4 Success Criterion 5 explicitly requires this flag to be functional within Phase 4. The plan author scoped the must_have truth to the library method only, which is narrower than what the ROADMAP contract requires.
+- `main.rs` now detects `--unstaged` from `std::env::args()` and passes a bool to `fast_staged::run`.
+- `lib.rs::run(unstaged: bool)` branches to `git_ctx.unstaged_files()` when the flag is set, and conditionally skips `backup()`/`cleanup()` (which target HEAD-vs-index state irrelevant in worktree-only mode).
+- Two integration tests lock in both the new path and the default (regression guard).
+- 74/74 tests pass, clippy clean, fmt clean.
 
-All other Phase 4 goals are fully achieved: git index reading via gix (no shell-out for file listing), patch backup/restore/cleanup with real git repos, clear errors for non-repo and no-staged-files conditions, and 72 passing tests with clippy and rustfmt clean.
+GIT-03 remains at "Partial" because the on-failure invocation of `restore()` requires execution logic that ships in Phase 5. This is an explicit cross-phase boundary — `restore()` itself is fully implemented, tested, and ready for Phase 5 to call. It does not block Phase 4's goal because no command execution exists yet.
+
+Phase 4's Goal — "Users can trust that the tool sees exactly the right staged files and that their index is safe if a command fails" — is achieved at the library and wiring level. Every observable truth from the ROADMAP success criteria is verified.
 
 ---
 
-_Verified: 2026-04-10_
+_Verified: 2026-04-24_
 _Verifier: Claude (gsd-verifier)_
