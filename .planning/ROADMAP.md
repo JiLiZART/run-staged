@@ -85,7 +85,7 @@ Plans:
 Plans:
 - [x] 04-01-PLAN.md — GitContext with open, staged_files, unstaged_files
 - [x] 04-02-PLAN.md — Backup/restore/cleanup pipeline wired into run()
-- [ ] 04-03-PLAN.md — Wire --unstaged flag (gap closure for GIT-05)
+- [x] 04-03-PLAN.md — Wire --unstaged flag (gap closure for GIT-05)
 
 ### Phase 5: Execution Core
 **Goal**: Users can run configured commands against matched staged files in parallel with correct exit code propagation

@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: Phase complete — ready for verification
-stopped_at: Completed 04-02-PLAN.md
-last_updated: "2026-04-11T19:09:45.483Z"
+status: Ready to execute
+stopped_at: Completed 04-03-PLAN.md
+last_updated: "2026-04-24T09:14:39.747Z"
 progress:
   total_phases: 9
   completed_phases: 4
-  total_plans: 6
-  completed_plans: 6
+  total_plans: 7
+  completed_plans: 7
 ---
 
 # Project State
@@ -24,7 +24,7 @@ See: .planning/PROJECT.md (updated 2026-04-09)
 ## Current Position
 
 Phase: 04 (git-integration) — EXECUTING
-Plan: 2 of 2
+Plan: 2 of 3
 
 ## Performance Metrics
 
@@ -52,6 +52,7 @@ Plan: 2 of 2
 | Phase 03-advanced-config P01 | 25 | 2 tasks | 4 files |
 | Phase 04-git-integration P01 | 426 | 1 tasks | 2 files |
 | Phase 04-git-integration P02 | 8 | 2 tasks | 3 files |
+| Phase 04-git-integration P03 | 4 | 1 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -77,6 +78,8 @@ Recent decisions affecting current work:
 - [Phase 04-git-integration]: CWD-mutating tests serialised with static Mutex — gix::discover uses CWD globally
 - [Phase 04-git-integration]: backup() uses git diff --cached shell-out — gix blob-level diff requires complex assembly; fallback explicitly allowed by research
 - [Phase 04-git-integration]: Integration tests migrated to real git repos — make_real_git_repo replaces fake .git/ stubs for gix open_index() compatibility
+- [Phase 04-git-integration]: Use std::env::args().any() for --unstaged detection (not clap) — Phase 6 adds full CLI per plan constraint
+- [Phase 04-git-integration]: Skip backup()/cleanup() in --unstaged mode — those target HEAD-vs-index diff, irrelevant for worktree-only flow
 
 ### Pending Todos
 
@@ -90,6 +93,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-11T19:09:45.440Z
-Stopped at: Completed 04-02-PLAN.md
+Last session: 2026-04-24T09:14:39.745Z
+Stopped at: Completed 04-03-PLAN.md
 Resume file: None
