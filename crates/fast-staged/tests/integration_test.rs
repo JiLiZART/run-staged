@@ -203,3 +203,86 @@ fn test_binary_exits_nonzero_with_no_staged_files() {
 
     fs::remove_dir_all(&dir).ok();
 }
+
+#[test]
+fn test_binary_with_unstaged_flag_shows_unstaged_files() {
+    let dir = make_temp_dir("unstaged-flag");
+    make_real_git_repo(&dir);
+    // Need a valid config so we reach git branch.
+    write_file(
+        &dir,
+        ".fast-staged.toml",
+        "[patterns]\n\"*.txt\" = [\"echo\"]\n",
+    );
+
+    // Commit a file, then modify it without staging.
+    stage_file(&dir, "tracked.txt", "original content");
+    let out = Command::new("git")
+        .args(["commit", "-m", "initial"])
+        .current_dir(&dir)
+        .output()
+        .expect("git commit");
+    assert!(out.status.success(), "git commit failed: {:?}", out);
+
+    // Modify the file in the worktree but do NOT stage.
+    fs::write(dir.join("tracked.txt"), "modified content").expect("write modified");
+
+    let output = Command::new(binary())
+        .args(["--unstaged"])
+        .current_dir(&dir)
+        .output()
+        .expect("run binary with --unstaged");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success(),
+        "Binary should exit 0 when --unstaged finds modified files. stderr: {stderr}"
+    );
+    // With --unstaged, the label must reflect unstaged mode, proving the flag
+    // was detected and the unstaged_files() branch was taken.
+    assert!(
+        stderr.contains("Unstaged files"),
+        "Expected 'Unstaged files' label in stderr with --unstaged, got: {stderr}"
+    );
+    assert!(
+        stderr.contains("tracked.txt"),
+        "Expected 'tracked.txt' in stderr with --unstaged, got: {stderr}"
+    );
+
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn test_binary_without_unstaged_flag_shows_staged_files() {
+    let dir = make_temp_dir("staged-no-flag");
+    make_real_git_repo(&dir);
+    write_file(
+        &dir,
+        ".fast-staged.toml",
+        "[patterns]\n\"*.txt\" = [\"echo\"]\n",
+    );
+
+    // Stage a file — no commit needed.
+    stage_file(&dir, "staged.txt", "content");
+
+    let output = Command::new(binary())
+        .current_dir(&dir)
+        .output()
+        .expect("run binary without --unstaged");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success(),
+        "Binary should exit 0 with staged files. stderr: {stderr}"
+    );
+    assert!(
+        stderr.contains("Staged files"),
+        "Expected 'Staged files' label in stderr without --unstaged, got: {stderr}"
+    );
+    assert!(
+        stderr.contains("staged.txt"),
+        "Expected 'staged.txt' in stderr, got: {stderr}"
+    );
+
+    fs::remove_dir_all(&dir).ok();
+}
