@@ -8,40 +8,141 @@
 //!
 //! `spawn_command()` runs a parsed argv via `tokio::process::Command`, mapping ENOENT
 //! to `AppError::CommandNotFound`.
-//!
-//! TDD RED stage: signatures only, bodies unimplemented. Tests defined below
-//! will fail until Task 2 GREEN lands real bodies.
 
 use std::path::{Path, PathBuf};
+use std::process::Stdio;
+
+use tokio::process::Command;
 
 use crate::AppError;
 use crate::config::types::PathFormat;
 
+/// Parse a command string and inject file paths.
+///
+/// - If the parsed argv contains a token equal to `"{files}"`, that ONE token is
+///   replaced inline by all file paths (in order, expanded to N tokens).
+/// - Otherwise, all file paths are appended positionally after the parsed argv.
+/// - Paths are formatted according to `path_format`: `Relative` passes them as-is
+///   (relative to `git_root`); `Absolute` joins `git_root` + path then calls
+///   `std::fs::canonicalize` (best-effort — falls back to the joined path if
+///   canonicalize fails, e.g. file does not yet exist).
+///
+/// Returns `Err(AppError::ConfigInvalid)` if shlex cannot parse the command (e.g.
+/// unbalanced quotes).
 pub fn build_argv(
-    _command: &str,
-    _files: &[PathBuf],
-    _path_format: PathFormat,
-    _git_root: &Path,
+    command: &str,
+    files: &[PathBuf],
+    path_format: PathFormat,
+    git_root: &Path,
 ) -> Result<Vec<String>, AppError> {
-    unimplemented!("build_argv: TDD RED — implement in GREEN commit")
+    let parsed = shlex::split(command)
+        .ok_or_else(|| AppError::ConfigInvalid(format!("invalid command syntax: {command:?}")))?;
+
+    let formatted_files: Vec<String> = files
+        .iter()
+        .map(|f| match path_format {
+            PathFormat::Relative => f.display().to_string(),
+            PathFormat::Absolute => {
+                let joined = git_root.join(f);
+                std::fs::canonicalize(&joined)
+                    .unwrap_or(joined)
+                    .display()
+                    .to_string()
+            }
+        })
+        .collect();
+
+    if let Some(idx) = parsed.iter().position(|t| t == "{files}") {
+        let mut out = Vec::with_capacity(parsed.len() - 1 + formatted_files.len());
+        out.extend_from_slice(&parsed[..idx]);
+        out.extend(formatted_files.iter().cloned());
+        out.extend_from_slice(&parsed[idx + 1..]);
+        Ok(out)
+    } else {
+        let mut out = parsed;
+        out.extend(formatted_files);
+        Ok(out)
+    }
 }
 
-pub(crate) fn chunk_files_with_budget<'a>(
-    _files: &'a [PathBuf],
-    _budget: usize,
-) -> Vec<&'a [PathBuf]> {
-    unimplemented!("chunk_files_with_budget: TDD RED — implement in GREEN commit")
+/// Platform ARG_MAX with 25% safety headroom for environment variables (D-26).
+#[cfg(unix)]
+fn arg_max() -> usize {
+    let raw = unsafe { libc::sysconf(libc::_SC_ARG_MAX) };
+    let limit = if raw > 0 { raw as usize } else { 131_072 };
+    (limit as f64 * 0.75) as usize
 }
 
-pub fn chunk_files<'a>(_cmd_argv: &[String], _files: &'a [PathBuf]) -> Vec<&'a [PathBuf]> {
-    unimplemented!("chunk_files: TDD RED — implement in GREEN commit")
+#[cfg(windows)]
+fn arg_max() -> usize {
+    (32_767.0 * 0.75) as usize
 }
 
+/// Internal helper exposed for testing — `chunk_files` calls this with
+/// `arg_max() - cmd_len` so unit tests can inject a tiny budget.
+pub(crate) fn chunk_files_with_budget(files: &[PathBuf], budget: usize) -> Vec<&[PathBuf]> {
+    if files.is_empty() {
+        return Vec::new();
+    }
+
+    let mut chunks = Vec::new();
+    let mut start = 0;
+    let mut current = 0usize;
+    for (i, f) in files.iter().enumerate() {
+        let len = f.as_os_str().len() + 1; // +1 for separator/NUL
+        if current + len > budget && start < i {
+            chunks.push(&files[start..i]);
+            start = i;
+            current = 0;
+        }
+        current += len;
+    }
+    if start < files.len() {
+        chunks.push(&files[start..]);
+    }
+    chunks
+}
+
+/// Split `files` into chunks where each chunk's total argv byte size (including
+/// the fixed `cmd_argv` prefix) stays under the platform `ARG_MAX` minus 25%
+/// headroom. Returns at least one chunk for any non-empty input; an empty
+/// `files` slice yields an empty `Vec` (D-27 — caller skips empty batches).
+pub fn chunk_files<'a>(cmd_argv: &[String], files: &'a [PathBuf]) -> Vec<&'a [PathBuf]> {
+    if files.is_empty() {
+        return Vec::new();
+    }
+    let cmd_len: usize = cmd_argv.iter().map(|s| s.len() + 1).sum();
+    let budget = arg_max().saturating_sub(cmd_len);
+    chunk_files_with_budget(files, budget)
+}
+
+/// Spawn a command and capture its full stdout+stderr.
+///
+/// - Returns `Ok(Output)` for both success AND non-zero exit (caller inspects
+///   `output.status` to decide what is a failure).
+/// - Returns `Err(AppError::CommandNotFound)` if the binary is not on PATH (ENOENT).
+/// - Returns `Err(AppError::Io)` for other IO errors.
 pub async fn spawn_command(
-    _argv: &[String],
-    _working_dir: &Path,
+    argv: &[String],
+    working_dir: &Path,
 ) -> Result<std::process::Output, AppError> {
-    unimplemented!("spawn_command: TDD RED — implement in GREEN commit")
+    if argv.is_empty() {
+        return Err(AppError::ConfigInvalid("empty argv".to_string()));
+    }
+    Command::new(&argv[0])
+        .args(&argv[1..])
+        .current_dir(working_dir)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .await
+        .map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                AppError::CommandNotFound(argv[0].clone())
+            } else {
+                AppError::Io(e)
+            }
+        })
 }
 
 #[cfg(test)]
@@ -92,6 +193,8 @@ mod tests {
 
     #[test]
     fn build_argv_path_format_absolute_canonicalizes() {
+        // Use the actual project root and a real-looking relative path.
+        // Even if canonicalize fails (file doesn't exist), it falls back to joined path.
         let git_root = root();
         let argv = build_argv(
             "tool",
@@ -100,8 +203,10 @@ mod tests {
             &git_root,
         )
         .unwrap();
+        // argv = ["tool", "<absolute>/src/lib.rs"]
         assert_eq!(argv.len(), 2);
         let last = &argv[1];
+        // Absolute paths start with "/" on unix or have a Windows drive letter / UNC prefix.
         let is_absolute = last.starts_with('/')
             || (last.len() > 2
                 && last.chars().nth(1) == Some(':')
@@ -124,13 +229,8 @@ mod tests {
 
     #[test]
     fn build_argv_no_files_with_placeholder_drops_token() {
-        let argv = build_argv(
-            "cmd {files} --strict",
-            &[],
-            PathFormat::Relative,
-            &root(),
-        )
-        .unwrap();
+        let argv = build_argv("cmd {files} --strict", &[], PathFormat::Relative, &root()).unwrap();
+        // Empty file list means {files} is replaced by nothing.
         assert_eq!(argv, vec!["cmd", "--strict"]);
     }
 
@@ -138,11 +238,7 @@ mod tests {
 
     #[test]
     fn chunk_files_returns_single_chunk_for_small_input() {
-        let files = vec![
-            PathBuf::from("a"),
-            PathBuf::from("b"),
-            PathBuf::from("c"),
-        ];
+        let files = vec![PathBuf::from("a"), PathBuf::from("b"), PathBuf::from("c")];
         let chunks = chunk_files(&["cmd".to_string()], &files);
         assert_eq!(chunks.len(), 1);
         assert_eq!(chunks[0].len(), 3);
@@ -156,10 +252,11 @@ mod tests {
 
     #[test]
     fn chunk_files_splits_on_arg_max_overflow() {
+        // Use a tiny synthetic budget via the test helper.
         let files: Vec<PathBuf> = vec![
-            PathBuf::from("aaaaaaa"),
-            PathBuf::from("bbbbbbb"),
-            PathBuf::from("ccccccc"),
+            PathBuf::from("aaaaaaa"), // 7+1 = 8
+            PathBuf::from("bbbbbbb"), // 8 -> running 16
+            PathBuf::from("ccccccc"), // 8 -> would push over 20
             PathBuf::from("ddddddd"),
         ];
         let chunks = chunk_files_with_budget(&files, 20);
@@ -168,6 +265,7 @@ mod tests {
             "expected at least 2 chunks, got {}",
             chunks.len()
         );
+        // Reassemble and verify order preserved.
         let flat: Vec<&PathBuf> = chunks.iter().flat_map(|c| c.iter()).collect();
         assert_eq!(flat.len(), files.len());
         for (i, f) in files.iter().enumerate() {
@@ -183,13 +281,16 @@ mod tests {
             PathBuf::from("c"),
             PathBuf::from("d"),
         ];
-        let chunks = chunk_files_with_budget(&files, 4);
+        let chunks = chunk_files_with_budget(&files, 4); // budget 4 -> chunks of ~2
         let flat: Vec<&PathBuf> = chunks.iter().flat_map(|c| c.iter()).collect();
         assert_eq!(flat, vec![&files[0], &files[1], &files[2], &files[3]]);
     }
 
     #[test]
     fn chunk_files_single_oversized_file_still_emits_chunk() {
+        // Pathological: one file alone exceeds budget. We still emit it as one chunk
+        // (caller would otherwise skip it, breaking semantics). The argv would fail
+        // at spawn — that's the OS's job to report.
         let files = vec![PathBuf::from("verylongfilename")];
         let chunks = chunk_files_with_budget(&files, 4);
         assert_eq!(chunks.len(), 1);
@@ -213,6 +314,7 @@ mod tests {
         let argv = vec!["false".to_string()];
         let cwd = std::env::current_dir().unwrap();
         let output = spawn_command(&argv, &cwd).await.unwrap();
+        // `false` always exits with code 1.
         assert_eq!(output.status.code(), Some(1));
     }
 
