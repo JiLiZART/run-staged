@@ -1,3 +1,4 @@
+pub mod commands;
 pub mod config;
 mod error;
 pub mod git;
