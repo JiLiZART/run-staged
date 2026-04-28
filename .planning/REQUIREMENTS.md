@@ -36,8 +36,8 @@
 - [ ] **EXEC-03**: Tool exits with non-zero code when any command fails
 - [ ] **EXEC-04**: Tool handles Ctrl+C signal and kills all child processes
 - [ ] **EXEC-05**: Tool supports per-command timeout with configurable duration
-- [ ] **EXEC-06**: Tool matches staged files to commands via glob patterns (with matchBase semantics)
-- [ ] **EXEC-07**: Tool supports --allow-empty flag to skip execution when no files match
+- [x] **EXEC-06**: Tool matches staged files to commands via glob patterns (with matchBase semantics)
+- [x] **EXEC-07**: Tool supports --allow-empty flag to skip execution when no files match
 
 ### CLI Interface
 
@@ -110,8 +110,8 @@
 | EXEC-03 | Phase 5 | Pending |
 | EXEC-04 | Phase 7 | Pending |
 | EXEC-05 | Phase 5 | Pending |
-| EXEC-06 | Phase 5 | Pending |
-| EXEC-07 | Phase 5 | Pending |
+| EXEC-06 | Phase 5 | Complete |
+| EXEC-07 | Phase 5 | Complete |
 | CLI-01 | Phase 6 | Pending |
 | CLI-02 | Phase 6 | Pending |
 | CLI-03 | Phase 6 | Pending |

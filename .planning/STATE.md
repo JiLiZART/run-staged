@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: Ready to plan
-stopped_at: Phase 5 context gathered
-last_updated: "2026-04-25T20:23:24.144Z"
+status: Ready to execute
+stopped_at: Completed 05-01-PLAN.md (matcher)
+last_updated: "2026-04-28T00:12:37.789Z"
 progress:
   total_phases: 9
   completed_phases: 4
-  total_plans: 7
-  completed_plans: 7
+  total_plans: 12
+  completed_plans: 8
 ---
 
 # Project State
@@ -19,12 +19,12 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-09)
 
 **Core value:** Run linting/formatting commands on staged files faster than lint-staged, with zero Node.js runtime dependency.
-**Current focus:** Phase 04 — git-integration
+**Current focus:** Phase 05 — execution-core
 
 ## Current Position
 
-Phase: 5
-Plan: Not started
+Phase: 05 (execution-core) — EXECUTING
+Plan: 2 of 5
 
 ## Performance Metrics
 
@@ -53,6 +53,7 @@ Plan: Not started
 | Phase 04-git-integration P01 | 426 | 1 tasks | 2 files |
 | Phase 04-git-integration P02 | 8 | 2 tasks | 3 files |
 | Phase 04-git-integration P03 | 4 | 1 tasks | 4 files |
+| Phase 05-execution-core P01 | 4 | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -80,6 +81,8 @@ Recent decisions affecting current work:
 - [Phase 04-git-integration]: Integration tests migrated to real git repos — make_real_git_repo replaces fake .git/ stubs for gix open_index() compatibility
 - [Phase 04-git-integration]: Use std::env::args().any() for --unstaged detection (not clap) — Phase 6 adds full CLI per plan constraint
 - [Phase 04-git-integration]: Skip backup()/cleanup() in --unstaged mode — those target HEAD-vs-index diff, irrelevant for worktree-only flow
+- [Phase 05-execution-core]: Glob matcher uses per-pattern build_globsets() with matchBase auto-prefix `**/` for slashless patterns; case_insensitive(false) enforced via GlobBuilder per pattern
+- [Phase 05-execution-core]: Each Group.patterns HashMap key is one pattern; negation-only entry returns ConfigInvalid (Pitfall 4 guard); include + negation requires two separate keys
 
 ### Pending Todos
 
@@ -93,6 +96,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-25T20:23:24.137Z
-Stopped at: Phase 5 context gathered
-Resume file: .planning/phases/05-execution-core/05-CONTEXT.md
+Last session: 2026-04-28T00:12:37.787Z
+Stopped at: Completed 05-01-PLAN.md (matcher)
+Resume file: None
