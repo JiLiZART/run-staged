@@ -20,14 +20,26 @@ pub enum AppError {
     #[error("command not found: {0}")]
     CommandNotFound(String),
 
-    #[error("command failed with exit code {0}")]
-    CommandFailed(i32),
+    #[error("command `{command}` failed with exit code {exit_code}")]
+    CommandFailed { command: String, exit_code: i32 },
 
-    #[error("command timed out after {0}")]
-    Timeout(String),
+    #[error("command `{command}` timed out after {duration:?}")]
+    CommandTimeout {
+        command: String,
+        duration: std::time::Duration,
+    },
 
     #[error("execution cancelled")]
     Cancelled,
+
+    #[error(
+        "failed to restore staged diff from patch at {patch_path}: {reason}\nrun `git apply --cached {patch_path}` to recover manually"
+    )]
+    RestoreFailed {
+        patch_path: std::path::PathBuf,
+        #[source]
+        reason: Box<dyn std::error::Error + Send + Sync>,
+    },
 
     #[error(transparent)]
     Io(#[from] std::io::Error),

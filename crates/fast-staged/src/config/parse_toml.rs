@@ -27,6 +27,7 @@ pub fn parse_toml_str(
         execution_order: &raw.execution_order,
         continue_on_error: &raw.continue_on_error,
         per_file: &raw.per_file,
+        path_format: &raw.path_format,
     };
 
     let mut groups = Vec::new();
@@ -41,12 +42,14 @@ pub fn parse_toml_str(
                 execution_order: None,
                 continue_on_error: None,
                 per_file: None,
+                path_format: None,
             },
             RootDefaults {
                 timeout: &raw.timeout,
                 execution_order: &raw.execution_order,
                 continue_on_error: &raw.continue_on_error,
                 per_file: &raw.per_file,
+                path_format: &raw.path_format,
             },
         )
         .map_err(|e| AppError::ConfigInvalid(format!("{path_display}: {e}")))?;
@@ -80,12 +83,14 @@ pub fn parse_toml_str(
                 execution_order: raw_group.execution_order,
                 continue_on_error: raw_group.continue_on_error,
                 per_file: raw_group.per_file,
+                path_format: raw_group.path_format,
             },
             RootDefaults {
                 timeout: &raw.timeout,
                 execution_order: &raw.execution_order,
                 continue_on_error: &raw.continue_on_error,
                 per_file: &raw.per_file,
+                path_format: &raw.path_format,
             },
         )
         .map_err(|e| AppError::ConfigInvalid(format!("{path_display}: {e}")))?;
@@ -457,5 +462,66 @@ per_file = true
             err.contains("no patterns"),
             "Expected 'no patterns' error, got: {err}"
         );
+    }
+
+    #[test]
+    fn test_path_format_named_group_absolute_parses() {
+        use crate::config::types::PathFormat;
+        let toml = r#"
+[tools]
+path_format = "absolute"
+[tools.patterns]
+"*.rs" = ["cargo fmt"]
+"#;
+        let config = parse(toml).unwrap();
+        assert_eq!(config.groups.len(), 1);
+        assert_eq!(config.groups[0].name, "tools");
+        assert_eq!(config.groups[0].path_format, PathFormat::Absolute);
+    }
+
+    #[test]
+    fn test_path_format_root_inherited_by_groups() {
+        use crate::config::types::PathFormat;
+        let toml = r#"
+path_format = "relative"
+
+[tools]
+[tools.patterns]
+"*.rs" = ["cargo fmt"]
+"#;
+        let config = parse(toml).unwrap();
+        assert_eq!(config.groups[0].path_format, PathFormat::Relative);
+    }
+
+    #[test]
+    fn test_path_format_invalid_value_in_group_returns_error() {
+        let toml = r#"
+[tools]
+path_format = "wrong"
+[tools.patterns]
+"*.rs" = ["cargo fmt"]
+"#;
+        let result = parse(toml);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("path_format"),
+            "Expected path_format error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_path_format_root_overridden_by_group() {
+        use crate::config::types::PathFormat;
+        let toml = r#"
+path_format = "relative"
+
+[tools]
+path_format = "absolute"
+[tools.patterns]
+"*.rs" = ["cargo fmt"]
+"#;
+        let config = parse(toml).unwrap();
+        assert_eq!(config.groups[0].path_format, PathFormat::Absolute);
     }
 }

@@ -188,6 +188,7 @@ mod tests {
             execution_order: ExecutionOrder::Parallel,
             continue_on_error: false,
             per_file: false,
+            path_format: crate::config::types::PathFormat::Relative,
         }
     }
 

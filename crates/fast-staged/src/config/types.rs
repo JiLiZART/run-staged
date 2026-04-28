@@ -18,6 +18,13 @@ pub enum ExecutionOrder {
     Sequential,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub enum PathFormat {
+    #[default]
+    Relative,
+    Absolute,
+}
+
 #[derive(Debug, Clone)]
 pub struct Group {
     pub name: String,
@@ -26,6 +33,7 @@ pub struct Group {
     pub execution_order: ExecutionOrder,
     pub continue_on_error: bool,
     pub per_file: bool,
+    pub path_format: PathFormat,
 }
 
 impl Default for Group {
@@ -37,6 +45,7 @@ impl Default for Group {
             execution_order: ExecutionOrder::Parallel,
             continue_on_error: false,
             per_file: false,
+            path_format: PathFormat::Relative,
         }
     }
 }
@@ -74,6 +83,7 @@ pub(crate) struct RawConfig {
     pub continue_on_error: Option<bool>,
     pub per_file: Option<bool>,
     pub patterns: Option<HashMap<String, Vec<String>>>,
+    pub path_format: Option<String>,
     #[serde(flatten)]
     pub groups: toml::map::Map<String, toml::Value>,
 }
@@ -88,6 +98,7 @@ pub(crate) struct RawGroupConfig {
     pub continue_on_error: Option<bool>,
     pub per_file: Option<bool>,
     pub patterns: Option<HashMap<String, Vec<String>>>,
+    pub path_format: Option<String>,
 }
 
 /// Raw intermediate struct for JSON deserialization.
@@ -99,6 +110,7 @@ pub(crate) struct RawJsonConfig {
     pub continue_on_error: Option<bool>,
     pub per_file: Option<bool>,
     pub patterns: Option<HashMap<String, Vec<String>>>,
+    pub path_format: Option<String>,
     #[serde(flatten)]
     pub groups: serde_json::Map<String, serde_json::Value>,
 }

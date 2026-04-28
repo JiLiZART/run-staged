@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::AppError;
 
-use super::types::{ExecutionOrder, Group};
+use super::types::{ExecutionOrder, Group, PathFormat};
 
 /// Raw settings for a group before defaults are applied.
 pub(crate) struct RawGroupSettings {
@@ -12,6 +12,7 @@ pub(crate) struct RawGroupSettings {
     pub execution_order: Option<String>,
     pub continue_on_error: Option<bool>,
     pub per_file: Option<bool>,
+    pub path_format: Option<String>,
 }
 
 /// Root-level defaults from the config file (before group-level overrides).
@@ -20,6 +21,7 @@ pub(crate) struct RootDefaults<'a> {
     pub execution_order: &'a Option<String>,
     pub continue_on_error: &'a Option<bool>,
     pub per_file: &'a Option<bool>,
+    pub path_format: &'a Option<String>,
 }
 
 /// Resolve a group's settings using cascading defaults: hardcoded -> root -> group.
@@ -28,6 +30,7 @@ pub(crate) struct RootDefaults<'a> {
 /// - `execution_order`: group wins over root; falls back to Parallel
 /// - `continue_on_error`: group wins over root; falls back to false
 /// - `per_file`: group wins over root; falls back to false
+/// - `path_format`: group wins over root; falls back to Relative
 pub(crate) fn resolve_group(
     group: RawGroupSettings,
     root: RootDefaults<'_>,
@@ -57,6 +60,20 @@ pub(crate) fn resolve_group(
         .unwrap_or(false);
     let per_file = group.per_file.or(*root.per_file).unwrap_or(false);
 
+    let path_format = match group
+        .path_format
+        .or_else(|| root.path_format.clone())
+        .as_deref()
+    {
+        None | Some("relative") => PathFormat::Relative,
+        Some("absolute") => PathFormat::Absolute,
+        Some(other) => {
+            return Err(AppError::ConfigInvalid(format!(
+                "unknown path_format: {other:?}, expected \"relative\" or \"absolute\""
+            )));
+        }
+    };
+
     Ok(Group {
         name: group.name,
         patterns: group.patterns,
@@ -64,6 +81,7 @@ pub(crate) fn resolve_group(
         execution_order,
         continue_on_error,
         per_file,
+        path_format,
     })
 }
 
@@ -82,6 +100,7 @@ mod tests {
         exec_order: Option<&str>,
         cont: Option<bool>,
         per_file: Option<bool>,
+        path_format: Option<&str>,
     ) -> RawGroupSettings {
         RawGroupSettings {
             patterns: empty_patterns(),
@@ -90,6 +109,7 @@ mod tests {
             execution_order: exec_order.map(String::from),
             continue_on_error: cont,
             per_file,
+            path_format: path_format.map(String::from),
         }
     }
 
@@ -98,20 +118,22 @@ mod tests {
         exec_order: &'a Option<String>,
         cont: &'a Option<bool>,
         per_file: &'a Option<bool>,
+        path_format: &'a Option<String>,
     ) -> RootDefaults<'a> {
         RootDefaults {
             timeout,
             execution_order: exec_order,
             continue_on_error: cont,
             per_file,
+            path_format,
         }
     }
 
     #[test]
     fn test_all_none_yields_hardcoded_defaults() {
         let group = resolve_group(
-            make_group(None, None, None, None),
-            make_root(&None, &None, &None, &None),
+            make_group(None, None, None, None, None),
+            make_root(&None, &None, &None, &None, &None),
         )
         .unwrap();
 
@@ -125,8 +147,8 @@ mod tests {
     fn test_group_timeout_none_inherits_root_timeout() {
         let root_timeout = Some("5s".to_string());
         let group = resolve_group(
-            make_group(None, None, None, None),
-            make_root(&root_timeout, &None, &None, &None),
+            make_group(None, None, None, None, None),
+            make_root(&root_timeout, &None, &None, &None, &None),
         )
         .unwrap();
 
@@ -137,8 +159,8 @@ mod tests {
     fn test_group_timeout_wins_over_root_timeout() {
         let root_timeout = Some("5s".to_string());
         let group = resolve_group(
-            make_group(Some("10s"), None, None, None),
-            make_root(&root_timeout, &None, &None, &None),
+            make_group(Some("10s"), None, None, None, None),
+            make_root(&root_timeout, &None, &None, &None, &None),
         )
         .unwrap();
 
@@ -149,8 +171,8 @@ mod tests {
     fn test_group_continue_on_error_inherits_root() {
         let root_cont = Some(true);
         let group = resolve_group(
-            make_group(None, None, None, None),
-            make_root(&None, &None, &root_cont, &None),
+            make_group(None, None, None, None, None),
+            make_root(&None, &None, &root_cont, &None, &None),
         )
         .unwrap();
 
@@ -161,8 +183,8 @@ mod tests {
     fn test_group_continue_on_error_wins_over_root() {
         let root_cont = Some(true);
         let group = resolve_group(
-            make_group(None, None, Some(false), None),
-            make_root(&None, &None, &root_cont, &None),
+            make_group(None, None, Some(false), None, None),
+            make_root(&None, &None, &root_cont, &None, &None),
         )
         .unwrap();
 
@@ -172,8 +194,8 @@ mod tests {
     #[test]
     fn test_invalid_execution_order_returns_error() {
         let result = resolve_group(
-            make_group(None, Some("invalid_order"), None, None),
-            make_root(&None, &None, &None, &None),
+            make_group(None, Some("invalid_order"), None, None, None),
+            make_root(&None, &None, &None, &None, &None),
         );
 
         assert!(result.is_err());
@@ -184,11 +206,69 @@ mod tests {
     #[test]
     fn test_sequential_execution_order_parsed() {
         let group = resolve_group(
-            make_group(None, Some("sequential"), None, None),
-            make_root(&None, &None, &None, &None),
+            make_group(None, Some("sequential"), None, None, None),
+            make_root(&None, &None, &None, &None, &None),
         )
         .unwrap();
 
         assert_eq!(group.execution_order, ExecutionOrder::Sequential);
+    }
+
+    #[test]
+    fn test_path_format_defaults_to_relative() {
+        let group = resolve_group(
+            make_group(None, None, None, None, None),
+            make_root(&None, &None, &None, &None, &None),
+        )
+        .unwrap();
+
+        assert_eq!(group.path_format, PathFormat::Relative);
+    }
+
+    #[test]
+    fn test_path_format_absolute_parsed() {
+        let group = resolve_group(
+            make_group(None, None, None, None, Some("absolute")),
+            make_root(&None, &None, &None, &None, &None),
+        )
+        .unwrap();
+
+        assert_eq!(group.path_format, PathFormat::Absolute);
+    }
+
+    #[test]
+    fn test_invalid_path_format_returns_error() {
+        let result = resolve_group(
+            make_group(None, None, None, None, Some("weird")),
+            make_root(&None, &None, &None, &None, &None),
+        );
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("path_format"));
+    }
+
+    #[test]
+    fn test_path_format_group_wins_over_root() {
+        let root_pf = Some("absolute".to_string());
+        let group = resolve_group(
+            make_group(None, None, None, None, Some("relative")),
+            make_root(&None, &None, &None, &None, &root_pf),
+        )
+        .unwrap();
+
+        assert_eq!(group.path_format, PathFormat::Relative);
+    }
+
+    #[test]
+    fn test_path_format_inherits_root() {
+        let root_pf = Some("absolute".to_string());
+        let group = resolve_group(
+            make_group(None, None, None, None, None),
+            make_root(&None, &None, &None, &None, &root_pf),
+        )
+        .unwrap();
+
+        assert_eq!(group.path_format, PathFormat::Absolute);
     }
 }

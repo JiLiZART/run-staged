@@ -74,12 +74,14 @@ fn parse_json_value(
                     execution_order: None,
                     continue_on_error: None,
                     per_file: None,
+                    path_format: None,
                 },
                 RootDefaults {
                     timeout: &None,
                     execution_order: &None,
                     continue_on_error: &None,
                     per_file: &None,
+                    path_format: &None,
                 },
             )
             .map_err(|e| AppError::ConfigInvalid(format!("{path_display}: {e}")))?;
@@ -118,12 +120,14 @@ fn build_config_from_json(
                 execution_order: None,
                 continue_on_error: None,
                 per_file: None,
+                path_format: None,
             },
             RootDefaults {
                 timeout: &raw.timeout,
                 execution_order: &raw.execution_order,
                 continue_on_error: &raw.continue_on_error,
                 per_file: &raw.per_file,
+                path_format: &raw.path_format,
             },
         )
         .map_err(|e| AppError::ConfigInvalid(format!("{path_display}: {e}")))?;
@@ -144,6 +148,7 @@ fn build_config_from_json(
             continue_on_error: Option<bool>,
             per_file: Option<bool>,
             patterns: Option<HashMap<String, Vec<String>>>,
+            path_format: Option<String>,
         }
 
         let raw_group: RawJsonGroup = serde_json::from_value(value.clone()).map_err(|e| {
@@ -163,12 +168,14 @@ fn build_config_from_json(
                 execution_order: raw_group.execution_order,
                 continue_on_error: raw_group.continue_on_error,
                 per_file: raw_group.per_file,
+                path_format: raw_group.path_format,
             },
             RootDefaults {
                 timeout: &raw.timeout,
                 execution_order: &raw.execution_order,
                 continue_on_error: &raw.continue_on_error,
                 per_file: &raw.per_file,
+                path_format: &raw.path_format,
             },
         )
         .map_err(|e| AppError::ConfigInvalid(format!("{path_display}: {e}")))?;
@@ -443,5 +450,36 @@ mod tests {
         assert_eq!(config.groups[0].name, "default");
         assert_eq!(config.groups[1].name, "beta");
         assert_eq!(config.groups[2].name, "alpha");
+    }
+
+    #[test]
+    fn test_json_path_format_named_group_parses() {
+        use crate::config::types::PathFormat;
+        let json = r#"{
+            "tools": {
+                "path_format": "absolute",
+                "patterns": { "*.rs": ["cargo fmt"] }
+            }
+        }"#;
+        let config = parse(json).unwrap();
+        assert_eq!(config.groups.len(), 1);
+        assert_eq!(config.groups[0].path_format, PathFormat::Absolute);
+    }
+
+    #[test]
+    fn test_json_path_format_invalid_value_returns_error() {
+        let json = r#"{
+            "tools": {
+                "path_format": "nope",
+                "patterns": { "*.rs": ["cargo fmt"] }
+            }
+        }"#;
+        let result = parse(json);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("path_format"),
+            "Expected path_format error, got: {err}"
+        );
     }
 }
