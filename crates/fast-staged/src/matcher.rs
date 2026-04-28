@@ -63,14 +63,41 @@ pub struct MatchedGroup<'a> {
 /// is `true` when at least one of the inputs was a non-negated pattern.
 /// Errors are mapped to [`AppError::ConfigInvalid`] with the offending raw
 /// pattern in the message.
-#[allow(dead_code)]
-fn build_globsets(_patterns: &[&str]) -> Result<(GlobSet, GlobSet, bool), AppError> {
-    // Stub for TDD RED phase — replaced with real implementation in GREEN.
-    Ok((
-        GlobSetBuilder::new().build().unwrap(),
-        GlobSetBuilder::new().build().unwrap(),
-        false,
-    ))
+fn build_globsets(patterns: &[&str]) -> Result<(GlobSet, GlobSet, bool), AppError> {
+    let mut include = GlobSetBuilder::new();
+    let mut exclude = GlobSetBuilder::new();
+    let mut has_any_include = false;
+
+    for raw in patterns {
+        let (set, body) = if let Some(stripped) = raw.strip_prefix('!') {
+            (&mut exclude, stripped)
+        } else {
+            has_any_include = true;
+            (&mut include, *raw)
+        };
+
+        // matchBase: if the (post-strip) pattern has no '/', auto-prefix '**/'.
+        let normalized = if !body.contains('/') {
+            format!("**/{body}")
+        } else {
+            body.to_string()
+        };
+
+        let glob = GlobBuilder::new(&normalized)
+            .case_insensitive(false)
+            .build()
+            .map_err(|e| AppError::ConfigInvalid(format!("invalid glob pattern {raw:?}: {e}")))?;
+        set.add(glob);
+    }
+
+    let include_set = include
+        .build()
+        .map_err(|e| AppError::ConfigInvalid(format!("failed to build include glob set: {e}")))?;
+    let exclude_set = exclude
+        .build()
+        .map_err(|e| AppError::ConfigInvalid(format!("failed to build exclude glob set: {e}")))?;
+
+    Ok((include_set, exclude_set, has_any_include))
 }
 
 /// Match staged `files` against the patterns declared in `config`.
@@ -88,11 +115,55 @@ fn build_globsets(_patterns: &[&str]) -> Result<(GlobSet, GlobSet, bool), AppErr
 ///   produced any matches. Plan 05 will suppress this error under
 ///   `--allow-empty`.
 pub fn match_files<'a>(
-    _config: &'a Config,
-    _files: &[PathBuf],
+    config: &'a Config,
+    files: &[PathBuf],
 ) -> Result<Vec<MatchedGroup<'a>>, AppError> {
-    // Stub for TDD RED phase — replaced with real implementation in GREEN.
-    Ok(Vec::new())
+    let mut matched_groups: Vec<MatchedGroup<'a>> = Vec::new();
+    let mut total_matched_patterns: usize = 0;
+
+    for group in &config.groups {
+        let mut group_patterns: Vec<MatchedPattern> = Vec::new();
+
+        for (pattern_str, commands) in &group.patterns {
+            let (include_set, exclude_set, has_any_include) =
+                build_globsets(&[pattern_str.as_str()])?;
+
+            if !has_any_include {
+                return Err(AppError::ConfigInvalid(format!(
+                    "group '{}' pattern '{}' has only negation — nothing can match",
+                    group.name, pattern_str
+                )));
+            }
+
+            let matched: Vec<PathBuf> = files
+                .iter()
+                .filter(|p| include_set.is_match(p) && !exclude_set.is_match(p))
+                .cloned()
+                .collect();
+
+            if !matched.is_empty() {
+                group_patterns.push(MatchedPattern {
+                    pattern: pattern_str.clone(),
+                    commands: commands.clone(),
+                    files: matched,
+                });
+            }
+        }
+
+        if !group_patterns.is_empty() {
+            total_matched_patterns += group_patterns.len();
+            matched_groups.push(MatchedGroup {
+                group,
+                patterns: group_patterns,
+            });
+        }
+    }
+
+    if total_matched_patterns == 0 {
+        return Err(AppError::NoFilesMatched);
+    }
+
+    Ok(matched_groups)
 }
 
 #[cfg(test)]
@@ -138,12 +209,7 @@ mod tests {
     #[test]
     fn matchbase_slashless_pattern_recurses() {
         let cfg = make_config(vec![make_group("lint", &[("*.ts", &["eslint"])])]);
-        let files = paths(&[
-            "top.ts",
-            "src/foo/bar.ts",
-            "deep/nested/dir/x.ts",
-            "foo.js",
-        ]);
+        let files = paths(&["top.ts", "src/foo/bar.ts", "deep/nested/dir/x.ts", "foo.js"]);
         let res = match_files(&cfg, &files).expect("should match");
         assert_eq!(res.len(), 1);
         assert_eq!(res[0].patterns.len(), 1);
