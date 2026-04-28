@@ -31,8 +31,8 @@
 
 ### Command Execution
 
-- [ ] **EXEC-01**: Tool runs matched commands in parallel by default
-- [ ] **EXEC-02**: Tool supports sequential execution mode via config
+- [x] **EXEC-01**: Tool runs matched commands in parallel by default
+- [x] **EXEC-02**: Tool supports sequential execution mode via config
 - [ ] **EXEC-03**: Tool exits with non-zero code when any command fails
 - [ ] **EXEC-04**: Tool handles Ctrl+C signal and kills all child processes
 - [ ] **EXEC-05**: Tool supports per-command timeout with configurable duration
@@ -105,8 +105,8 @@
 | GIT-05 | Phase 4 | Complete |
 | GIT-06 | Phase 4 | Complete |
 | GIT-07 | Phase 4 | Complete |
-| EXEC-01 | Phase 5 | Pending |
-| EXEC-02 | Phase 5 | Pending |
+| EXEC-01 | Phase 5 | Complete |
+| EXEC-02 | Phase 5 | Complete |
 | EXEC-03 | Phase 5 | Pending |
 | EXEC-04 | Phase 7 | Pending |
 | EXEC-05 | Phase 5 | Pending |

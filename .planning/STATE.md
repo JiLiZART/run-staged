@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: Ready to execute
-stopped_at: Completed 05-01-PLAN.md (matcher)
-last_updated: "2026-04-28T00:12:37.789Z"
+stopped_at: Completed 05-02-PLAN.md (commands foundation)
+last_updated: "2026-04-28T00:22:49.427Z"
 progress:
   total_phases: 9
   completed_phases: 4
   total_plans: 12
-  completed_plans: 8
+  completed_plans: 9
 ---
 
 # Project State
@@ -24,7 +24,7 @@ See: .planning/PROJECT.md (updated 2026-04-09)
 ## Current Position
 
 Phase: 05 (execution-core) — EXECUTING
-Plan: 2 of 5
+Plan: 3 of 5
 
 ## Performance Metrics
 
@@ -54,6 +54,7 @@ Plan: 2 of 5
 | Phase 04-git-integration P02 | 8 | 2 tasks | 3 files |
 | Phase 04-git-integration P03 | 4 | 1 tasks | 4 files |
 | Phase 05-execution-core P01 | 4 | 2 tasks | 2 files |
+| Phase 05-execution-core P02 | 8 | 2 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -83,6 +84,9 @@ Recent decisions affecting current work:
 - [Phase 04-git-integration]: Skip backup()/cleanup() in --unstaged mode — those target HEAD-vs-index diff, irrelevant for worktree-only flow
 - [Phase 05-execution-core]: Glob matcher uses per-pattern build_globsets() with matchBase auto-prefix `**/` for slashless patterns; case_insensitive(false) enforced via GlobBuilder per pattern
 - [Phase 05-execution-core]: Each Group.patterns HashMap key is one pattern; negation-only entry returns ConfigInvalid (Pitfall 4 guard); include + negation requires two separate keys
+- [Phase 05-execution-core]: shlex 1.3 for direct argv tokenization (D-05); ENOENT maps to AppError::CommandNotFound (D-08); ARG_MAX with 25% headroom for env vars (D-26); single oversized file emits as 1-element chunk rather than skip
+- [Phase 05-execution-core]: AppError extended: CommandFailed/CommandTimeout reshaped to struct variants with context fields; RestoreFailed.reason boxed as dyn Error+Send+Sync (thiserror 2 reserves 'source' field name for #[source] attribute requiring StdError)
+- [Phase 05-execution-core]: PathFormat enum threaded through config types/parsers/defaults; cascade hardcoded->root->group; libc 0.2 added as direct dep for sysconf access (not transitively re-exported via nix)
 
 ### Pending Todos
 
@@ -96,6 +100,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-28T00:12:37.787Z
-Stopped at: Completed 05-01-PLAN.md (matcher)
+Last session: 2026-04-28T00:22:49.425Z
+Stopped at: Completed 05-02-PLAN.md (commands foundation)
 Resume file: None
