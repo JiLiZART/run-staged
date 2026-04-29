@@ -3,13 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: Ready to execute
-stopped_at: Completed 05-02-PLAN.md (commands foundation)
-last_updated: "2026-04-28T00:22:49.427Z"
+stopped_at: Completed 05-03-PLAN.md (execute_all + per-group cancel + cross-group gate)
+last_updated: "2026-04-29T09:17:12.297Z"
 progress:
   total_phases: 9
   completed_phases: 4
   total_plans: 12
-  completed_plans: 9
+  completed_plans: 10
+  percent: 83
 ---
 
 # Project State
@@ -24,7 +25,7 @@ See: .planning/PROJECT.md (updated 2026-04-09)
 ## Current Position
 
 Phase: 05 (execution-core) — EXECUTING
-Plan: 3 of 5
+Plan: 4 of 5
 
 ## Performance Metrics
 
@@ -55,6 +56,7 @@ Plan: 3 of 5
 | Phase 04-git-integration P03 | 4 | 1 tasks | 4 files |
 | Phase 05-execution-core P01 | 4 | 2 tasks | 2 files |
 | Phase 05-execution-core P02 | 8 | 2 tasks | 9 files |
+| Phase 05-execution-core P03 | 5 | 1 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -87,6 +89,7 @@ Recent decisions affecting current work:
 - [Phase 05-execution-core]: shlex 1.3 for direct argv tokenization (D-05); ENOENT maps to AppError::CommandNotFound (D-08); ARG_MAX with 25% headroom for env vars (D-26); single oversized file emits as 1-element chunk rather than skip
 - [Phase 05-execution-core]: AppError extended: CommandFailed/CommandTimeout reshaped to struct variants with context fields; RestoreFailed.reason boxed as dyn Error+Send+Sync (thiserror 2 reserves 'source' field name for #[source] attribute requiring StdError)
 - [Phase 05-execution-core]: PathFormat enum threaded through config types/parsers/defaults; cascade hardcoded->root->group; libc 0.2 added as direct dep for sysconf access (not transitively re-exported via nix)
+- [Phase 05-execution-core]: execute_all() is infallible-by-construction; CommandNotFound mapped to CommandOutcome::Failure(exit_code=127) per POSIX shell convention; per-group cancellation is cooperative-only (Plan 04 timeout will kill in-flight); JoinSet panics + argv-build errors become synthetic Failure outcomes
 
 ### Pending Todos
 
@@ -100,6 +103,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-28T00:22:49.425Z
-Stopped at: Completed 05-02-PLAN.md (commands foundation)
+Last session: 2026-04-29T09:17:12.295Z
+Stopped at: Completed 05-03-PLAN.md (execute_all + per-group cancel + cross-group gate)
 Resume file: None

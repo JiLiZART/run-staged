@@ -33,7 +33,7 @@
 
 - [x] **EXEC-01**: Tool runs matched commands in parallel by default
 - [x] **EXEC-02**: Tool supports sequential execution mode via config
-- [ ] **EXEC-03**: Tool exits with non-zero code when any command fails
+- [x] **EXEC-03**: Tool exits with non-zero code when any command fails
 - [ ] **EXEC-04**: Tool handles Ctrl+C signal and kills all child processes
 - [ ] **EXEC-05**: Tool supports per-command timeout with configurable duration
 - [x] **EXEC-06**: Tool matches staged files to commands via glob patterns (with matchBase semantics)
@@ -107,7 +107,7 @@
 | GIT-07 | Phase 4 | Complete |
 | EXEC-01 | Phase 5 | Complete |
 | EXEC-02 | Phase 5 | Complete |
-| EXEC-03 | Phase 5 | Pending |
+| EXEC-03 | Phase 5 | Complete |
 | EXEC-04 | Phase 7 | Pending |
 | EXEC-05 | Phase 5 | Pending |
 | EXEC-06 | Phase 5 | Complete |
