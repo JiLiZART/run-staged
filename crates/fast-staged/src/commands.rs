@@ -723,6 +723,19 @@ mod tests {
         }
     }
 
+    /// Plan 04 helper: like `make_group` but pre-sets `timeout = Some(Duration::from_millis(timeout_ms))`.
+    fn make_group_with_timeout(name: &str, timeout_ms: u64) -> Group {
+        Group {
+            name: name.to_string(),
+            patterns: HashMap::new(),
+            timeout: Some(Duration::from_millis(timeout_ms)),
+            execution_order: ExecutionOrder::Parallel,
+            continue_on_error: false,
+            per_file: false,
+            path_format: PathFormat::Relative,
+        }
+    }
+
     fn make_config(continue_on_error: bool) -> Config {
         Config {
             source: ConfigSource::TomlFile(PathBuf::from("test.toml")),
@@ -1062,5 +1075,82 @@ mod tests {
             }
             other => panic!("expected Failure, got {other:?}"),
         }
+    }
+
+    // ---- Plan 05-04: timeout enforcement (TDD RED stubs) ----
+
+    #[cfg(unix)]
+    #[tokio::test]
+    #[ignore = "Plan 04 implements timeout — this stub goes green when run_one wraps spawn in tokio::time::timeout"]
+    async fn timeout_kills_long_running_process() {
+        let group = make_group_with_timeout("slow", 150);
+        let pattern = MatchedPattern {
+            pattern: "*.x".to_string(),
+            commands: vec!["sh -c \"sleep 30\"".to_string()],
+            files: vec![PathBuf::from("dummy.x")],
+        };
+        let matched = MatchedGroup {
+            group: &group,
+            patterns: vec![pattern],
+        };
+        let config = make_config(true);
+        let started = Instant::now();
+        let outcomes = super::execute_all(&[matched], &config, std::path::Path::new(".")).await;
+        let elapsed = started.elapsed();
+
+        assert!(
+            elapsed < Duration::from_secs(5),
+            "timeout did not fire within 5s — actual elapsed={elapsed:?}"
+        );
+        assert_eq!(
+            outcomes.len(),
+            1,
+            "expected exactly one outcome, got {outcomes:?}"
+        );
+        match &outcomes[0] {
+            CommandOutcome::Failure {
+                exit_code, stderr, ..
+            } => {
+                let s = String::from_utf8_lossy(stderr);
+                assert!(
+                    s.contains("timed out"),
+                    "stderr should mention 'timed out', got {s:?}"
+                );
+                assert_eq!(*exit_code, -1, "timeout failure must use exit_code -1");
+            }
+            other => panic!("expected Failure, got {other:?}"),
+        }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    #[ignore = "Plan 04 implements SIGTERM-then-SIGKILL — this stub goes green when terminate() escalates"]
+    async fn sigterm_then_sigkill_reaps_child() {
+        let group = make_group_with_timeout("trap-term", 150);
+        // Process traps SIGTERM and ignores it — only SIGKILL will end it.
+        let pattern = MatchedPattern {
+            pattern: "*.x".to_string(),
+            commands: vec!["sh -c \"trap '' TERM; sleep 30\"".to_string()],
+            files: vec![PathBuf::from("dummy.x")],
+        };
+        let matched = MatchedGroup {
+            group: &group,
+            patterns: vec![pattern],
+        };
+        let config = make_config(true);
+        let started = Instant::now();
+        let outcomes = super::execute_all(&[matched], &config, std::path::Path::new(".")).await;
+        let elapsed = started.elapsed();
+
+        // 150ms timeout + 2s SIGTERM grace + small SIGKILL latency must finish well under 5s.
+        assert!(
+            elapsed < Duration::from_secs(5),
+            "SIGKILL fallback didn't fire within 5s — elapsed={elapsed:?}"
+        );
+        assert!(
+            matches!(&outcomes[0], CommandOutcome::Failure { .. }),
+            "expected Failure outcome, got {:?}",
+            outcomes[0]
+        );
     }
 }
