@@ -114,12 +114,11 @@ Plans:
   2. `fast-staged --version` prints the semver version and exits 0
   3. `fast-staged --help` prints usage, available flags, and exits 0
   4. `--quiet`, `--unstaged`, and `--allow-empty` flags are accepted and forwarded to runtime behavior
-**Plans:** 3 plans
+**Plans:** 2 plans
 
 Plans:
-- [x] 04-01-PLAN.md — GitContext with open, staged_files, unstaged_files
-- [x] 04-02-PLAN.md — Backup/restore/cleanup pipeline wired into run()
-- [ ] 04-03-PLAN.md — Wire --unstaged flag (gap closure for GIT-05)
+- [ ] 06-01-PLAN.md — clap derive Cli + lib::run config_path: Option<PathBuf> + Cargo.toml description
+- [ ] 06-02-PLAN.md — Six new integration tests covering --version/--help/unknown-flag/--config/--quiet
 
 ### Phase 7: Signal Handling & Resilience
 **Goal**: Users can safely interrupt the tool at any time without orphaned processes or a corrupted terminal
@@ -206,7 +205,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 | 3. Advanced Config | 1/1 | Complete   | 2026-04-09 |
 | 4. Git Integration | 2/3 | In Progress | - |
 | 5. Execution Core | 0/TBD | Not started | - |
-| 6. CLI Interface | 0/TBD | Not started | - |
+| 6. CLI Interface | 0/2 | Planned | - |
 | 7. Signal Handling & Resilience | 0/TBD | Not started | - |
 | 8. TUI Layer | 0/TBD | Not started | - |
 | 9. Lint-staged Compatibility | 0/TBD | Not started | - |
