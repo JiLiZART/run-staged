@@ -135,8 +135,7 @@ mod tests {
 
     #[test]
     fn print_success_line_format() {
-        let s =
-            format_success_line("tools", "*.rs", "cargo fmt", Duration::from_millis(120), 3);
+        let s = format_success_line("tools", "*.rs", "cargo fmt", Duration::from_millis(120), 3);
         // Whitespace-tolerant — assert each fragment in the output.
         assert!(s.contains("✓"), "expected ✓ glyph in {s}");
         assert!(s.contains("tools/*.rs"), "expected group/pattern in {s}");

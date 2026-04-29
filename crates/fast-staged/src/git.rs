@@ -26,6 +26,19 @@ impl GitContext {
         self.repo.git_dir()
     }
 
+    /// Return the path to the working directory (the repository root, NOT the
+    /// `.git` directory). Used by the executor for `PathFormat::Absolute`
+    /// canonicalization and by `lib.rs::run()` as `git_root`.
+    ///
+    /// Panics: if the repository is bare (no working directory). Pre-commit
+    /// hooks never run in bare repos, so this is unreachable in normal use;
+    /// the panic exposes a misuse rather than masking it with a bogus fallback.
+    pub fn work_dir(&self) -> &Path {
+        self.repo
+            .workdir()
+            .expect("GitContext::work_dir called on a bare repository")
+    }
+
     /// Return the list of staged files (index stage-0 entries).
     ///
     /// Uses `open_index()` (fresh read from disk) rather than the lazily-cached
