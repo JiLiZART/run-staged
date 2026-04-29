@@ -288,7 +288,7 @@ mod tests {
         let p_snap = PathBuf::from("foo.snap");
         let p_snap_ts = PathBuf::from("foo.snap.ts");
         assert!(inc.is_match(&p_ts) && !exc.is_match(&p_ts));
-        assert!(!(inc.is_match(&p_snap) && !exc.is_match(&p_snap)));
+        assert!(!inc.is_match(&p_snap) || exc.is_match(&p_snap));
         // foo.snap.ts ends in `.ts` so include matches; only `*.snap` is
         // excluded (basename does not end in `.snap`), so it survives.
         assert!(inc.is_match(&p_snap_ts) && !exc.is_match(&p_snap_ts));
