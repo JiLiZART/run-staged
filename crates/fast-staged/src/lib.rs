@@ -3,6 +3,7 @@ pub mod config;
 mod error;
 pub mod git;
 pub mod matcher;
+pub mod output;
 pub use error::AppError;
 
 pub async fn run(unstaged: bool) -> Result<(), AppError> {
