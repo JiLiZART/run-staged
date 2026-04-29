@@ -15,8 +15,10 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
+use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 use tokio::task::JoinSet;
+use tokio::time::timeout as tokio_timeout;
 
 use crate::AppError;
 use crate::config::types::{Config, ExecutionOrder, PathFormat};
@@ -90,15 +92,30 @@ struct Task {
     working_dir: PathBuf,
 }
 
-/// Drive a single [`Task`] through `spawn_command`, mapping the result to a
-/// [`CommandOutcome`]. Plan 04 will wrap this body with `tokio::time::timeout`
-/// for per-group timeout — keep this function small so that edit is surgical.
+/// Drive a single [`Task`] through a manual spawn (so the [`Child`] handle is
+/// retained for `kill()`), mapping the result to a [`CommandOutcome`].
 ///
-/// Cooperative cancellation (D-13): if the per-group flag is already set when
-/// `run_one` starts, the function returns `CommandOutcome::Cancelled` without
-/// spawning. Once `spawn_command` is in flight we do not interrupt it — the
-/// caller's spawn loop simply stops scheduling new work.
-async fn run_one(task: Task, cancel: Arc<AtomicBool>) -> CommandOutcome {
+/// **Plan 04 timeout enforcement (D-17, D-18, D-19, D-20):**
+/// When `effective_timeout = Some(d)`, `child.wait()` is wrapped in
+/// `tokio::time::timeout(d, ...)`. On `Elapsed`:
+/// - **Unix:** send SIGTERM via `nix::sys::signal::kill`, await `child.wait()`
+///   for up to 2 seconds (grace window for cooperative cleanup), then call
+///   `child.kill().await` (SIGKILL) which also reaps the child to avoid zombies.
+/// - **Windows:** call `child.kill().await` directly — `TerminateProcess`
+///   has no graceful-exit equivalent, so no SIGTERM grace window.
+///
+/// When `effective_timeout = None`, no timeout wrapping is applied — the spawn
+/// awaits `child.wait()` directly, behavior-equivalent to the Plan 03 path.
+///
+/// **Cooperative cancellation (D-13):** if the per-group flag is already set
+/// when `run_one` starts, the function returns `CommandOutcome::Cancelled`
+/// without spawning. Once the child is in flight we do not interrupt it from
+/// this layer (only the timeout path kills running children).
+async fn run_one(
+    task: Task,
+    cancel: Arc<AtomicBool>,
+    effective_timeout: Option<Duration>,
+) -> CommandOutcome {
     if cancel.load(Ordering::Relaxed) {
         return CommandOutcome::Cancelled {
             group: task.group_name,
@@ -108,69 +125,176 @@ async fn run_one(task: Task, cancel: Arc<AtomicBool>) -> CommandOutcome {
     }
 
     let start = Instant::now();
-    let result = spawn_command(&task.argv, &task.working_dir).await;
-    let duration = start.elapsed();
 
-    match result {
-        Ok(output) => {
-            if output.status.success() {
-                CommandOutcome::Success {
-                    group: task.group_name,
-                    pattern: task.pattern,
-                    command: task.command,
-                    argv: task.argv,
-                    file_count: task.file_count,
-                    duration,
-                    stdout: output.stdout,
-                }
-            } else {
-                CommandOutcome::Failure {
-                    group: task.group_name,
-                    pattern: task.pattern,
-                    command: task.command,
-                    argv: task.argv,
-                    file_count: task.file_count,
-                    duration,
-                    exit_code: output.status.code().unwrap_or(-1),
-                    stdout: output.stdout,
-                    stderr: output.stderr,
-                }
-            }
+    if task.argv.is_empty() {
+        // Defensive: spawn_command also rejects empty argv, but keep the
+        // shape parallel for the manual spawn path.
+        return failure_outcome_io_msg(&task, start.elapsed(), "empty argv".to_string());
+    }
+
+    // Manual spawn — keep Child so we can kill on timeout.
+    let mut child = match Command::new(&task.argv[0])
+        .args(&task.argv[1..])
+        .current_dir(&task.working_dir)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+    {
+        Ok(c) => c,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return failure_outcome_command_not_found(&task, start.elapsed());
         }
-        Err(AppError::CommandNotFound(name)) => CommandOutcome::Failure {
+        Err(e) => {
+            return failure_outcome_io(&task, start.elapsed(), e);
+        }
+    };
+
+    // Take stdout/stderr handles so `child.wait()` can advance. We drain
+    // them *after* the process exits — child output is small (lint/format
+    // stderr-summary scale) so a deferred read is acceptable.
+    let stdout_handle = child.stdout.take();
+    let stderr_handle = child.stderr.take();
+
+    let exit_status_result = match effective_timeout {
+        Some(d) => match tokio_timeout(d, child.wait()).await {
+            Ok(inner) => inner,
+            Err(_elapsed) => {
+                // Timeout fired — terminate the child (SIGTERM-then-SIGKILL on
+                // Unix; TerminateProcess on Windows). After this, `child` has
+                // been reaped by `kill().await`, so we can drop the handles.
+                terminate(&mut child).await;
+                return failure_outcome_timeout(&task, start.elapsed(), d);
+            }
+        },
+        None => child.wait().await,
+    };
+
+    let exit_status = match exit_status_result {
+        Ok(s) => s,
+        Err(e) => {
+            return failure_outcome_io(&task, start.elapsed(), e);
+        }
+    };
+
+    // Drain captured stdout / stderr.
+    let mut stdout_buf = Vec::new();
+    if let Some(mut h) = stdout_handle {
+        let _ = h.read_to_end(&mut stdout_buf).await;
+    }
+    let mut stderr_buf = Vec::new();
+    if let Some(mut h) = stderr_handle {
+        let _ = h.read_to_end(&mut stderr_buf).await;
+    }
+
+    let duration = start.elapsed();
+    if exit_status.success() {
+        CommandOutcome::Success {
             group: task.group_name,
             pattern: task.pattern,
             command: task.command,
             argv: task.argv,
             file_count: task.file_count,
             duration,
-            // POSIX convention: shell maps ENOENT to exit code 127.
-            exit_code: 127,
-            stdout: vec![],
-            stderr: format!("command not found: {name}").into_bytes(),
-        },
-        Err(AppError::Io(e)) => CommandOutcome::Failure {
+            stdout: stdout_buf,
+        }
+    } else {
+        CommandOutcome::Failure {
             group: task.group_name,
             pattern: task.pattern,
             command: task.command,
             argv: task.argv,
             file_count: task.file_count,
             duration,
-            exit_code: -1,
-            stdout: vec![],
-            stderr: format!("io error: {e}").into_bytes(),
-        },
-        Err(other) => CommandOutcome::Failure {
-            group: task.group_name,
-            pattern: task.pattern,
-            command: task.command,
-            argv: task.argv,
-            file_count: task.file_count,
-            duration,
-            exit_code: -1,
-            stdout: vec![],
-            stderr: format!("{other}").into_bytes(),
-        },
+            exit_code: exit_status.code().unwrap_or(-1),
+            stdout: stdout_buf,
+            stderr: stderr_buf,
+        }
+    }
+}
+
+/// Cross-platform child termination after a timeout fired.
+///
+/// **Unix:** send SIGTERM via `nix::sys::signal::kill`, then await
+/// `child.wait()` with a 2-second grace timeout. After the grace window
+/// (or if SIGTERM dispatch failed), call `child.kill().await` which sends
+/// SIGKILL and reaps the child (avoiding zombies — Pitfall 6).
+///
+/// **Windows:** there is no graceful-termination equivalent, so call
+/// `child.kill().await` directly (`TerminateProcess`).
+async fn terminate(child: &mut tokio::process::Child) {
+    #[cfg(unix)]
+    {
+        if let Some(pid) = child.id() {
+            let _ = nix::sys::signal::kill(
+                nix::unistd::Pid::from_raw(pid as i32),
+                nix::sys::signal::Signal::SIGTERM,
+            );
+            // Grace window for cooperative cleanup before SIGKILL.
+            let _ = tokio_timeout(Duration::from_secs(2), child.wait()).await;
+        }
+    }
+    // SIGKILL on Unix; TerminateProcess on Windows. Also reaps the child.
+    let _ = child.kill().await;
+}
+
+/// Build a [`CommandOutcome::Failure`] for the timeout path, with a stderr body
+/// derived from `AppError::CommandTimeout` so it always contains `"timed out"`.
+fn failure_outcome_timeout(
+    task: &Task,
+    duration: Duration,
+    configured: Duration,
+) -> CommandOutcome {
+    let err = AppError::CommandTimeout {
+        command: task.command.clone(),
+        duration: configured,
+    };
+    CommandOutcome::Failure {
+        group: task.group_name.clone(),
+        pattern: task.pattern.clone(),
+        command: task.command.clone(),
+        argv: task.argv.clone(),
+        file_count: task.file_count,
+        duration,
+        exit_code: -1,
+        stdout: Vec::new(),
+        stderr: err.to_string().into_bytes(),
+    }
+}
+
+/// Build a [`CommandOutcome::Failure`] for the ENOENT path (POSIX convention:
+/// shell exit 127, stderr `"command not found: NAME"`).
+fn failure_outcome_command_not_found(task: &Task, duration: Duration) -> CommandOutcome {
+    CommandOutcome::Failure {
+        group: task.group_name.clone(),
+        pattern: task.pattern.clone(),
+        command: task.command.clone(),
+        argv: task.argv.clone(),
+        file_count: task.file_count,
+        duration,
+        exit_code: 127,
+        stdout: Vec::new(),
+        stderr: format!("command not found: {}", task.argv[0]).into_bytes(),
+    }
+}
+
+/// Build a [`CommandOutcome::Failure`] for an arbitrary `std::io::Error`.
+fn failure_outcome_io(task: &Task, duration: Duration, e: std::io::Error) -> CommandOutcome {
+    failure_outcome_io_msg(task, duration, format!("io error: {e}"))
+}
+
+/// Build a [`CommandOutcome::Failure`] with a synthetic stderr message
+/// (no `std::io::Error` instance available).
+fn failure_outcome_io_msg(task: &Task, duration: Duration, msg: String) -> CommandOutcome {
+    CommandOutcome::Failure {
+        group: task.group_name.clone(),
+        pattern: task.pattern.clone(),
+        command: task.command.clone(),
+        argv: task.argv.clone(),
+        file_count: task.file_count,
+        duration,
+        exit_code: -1,
+        stdout: Vec::new(),
+        stderr: msg.into_bytes(),
     }
 }
 
@@ -233,11 +357,12 @@ async fn execute_group_parallel(
     tasks: Vec<Task>,
     cancel: Arc<AtomicBool>,
     continue_on_error: bool,
+    effective_timeout: Option<Duration>,
 ) -> Vec<CommandOutcome> {
     let mut set: JoinSet<CommandOutcome> = JoinSet::new();
     for task in tasks {
         let cancel_for_task = Arc::clone(&cancel);
-        set.spawn(async move { run_one(task, cancel_for_task).await });
+        set.spawn(async move { run_one(task, cancel_for_task, effective_timeout).await });
     }
 
     let mut outcomes = Vec::new();
@@ -272,10 +397,11 @@ async fn execute_group_sequential(
     tasks: Vec<Task>,
     cancel: Arc<AtomicBool>,
     continue_on_error: bool,
+    effective_timeout: Option<Duration>,
 ) -> Vec<CommandOutcome> {
     let mut outcomes = Vec::with_capacity(tasks.len());
     for task in tasks {
-        let outcome = run_one(task, Arc::clone(&cancel)).await;
+        let outcome = run_one(task, Arc::clone(&cancel), effective_timeout).await;
         if outcome.is_failure() && !continue_on_error {
             cancel.store(true, Ordering::Relaxed);
         }
@@ -359,12 +485,29 @@ pub async fn execute_all(
             continue;
         }
 
+        // Plan 04 (D-17): `Group.timeout` already reflects the
+        // group→global→none cascade per `defaults::resolve_group()`, so we
+        // consume it directly here with no further merge.
+        let effective_timeout = matched.group.timeout;
+
         let group_outcomes = match matched.group.execution_order {
             ExecutionOrder::Parallel => {
-                execute_group_parallel(tasks, cancel, matched.group.continue_on_error).await
+                execute_group_parallel(
+                    tasks,
+                    cancel,
+                    matched.group.continue_on_error,
+                    effective_timeout,
+                )
+                .await
             }
             ExecutionOrder::Sequential => {
-                execute_group_sequential(tasks, cancel, matched.group.continue_on_error).await
+                execute_group_sequential(
+                    tasks,
+                    cancel,
+                    matched.group.continue_on_error,
+                    effective_timeout,
+                )
+                .await
             }
         };
 
@@ -1081,7 +1224,6 @@ mod tests {
 
     #[cfg(unix)]
     #[tokio::test]
-    #[ignore = "Plan 04 implements timeout — this stub goes green when run_one wraps spawn in tokio::time::timeout"]
     async fn timeout_kills_long_running_process() {
         let group = make_group_with_timeout("slow", 150);
         let pattern = MatchedPattern {
@@ -1124,7 +1266,6 @@ mod tests {
 
     #[cfg(unix)]
     #[tokio::test]
-    #[ignore = "Plan 04 implements SIGTERM-then-SIGKILL — this stub goes green when terminate() escalates"]
     async fn sigterm_then_sigkill_reaps_child() {
         let group = make_group_with_timeout("trap-term", 150);
         // Process traps SIGTERM and ignores it — only SIGKILL will end it.
@@ -1150,6 +1291,29 @@ mod tests {
         assert!(
             matches!(&outcomes[0], CommandOutcome::Failure { .. }),
             "expected Failure outcome, got {:?}",
+            outcomes[0]
+        );
+    }
+
+    /// Regression guard for Plan 04: when `Group.timeout == None`, the spawn
+    /// path must behave byte-equivalent to Plan 03 — no spurious timeout
+    /// errors, no SIGTERM/SIGKILL escalation, ordinary `Success` outcome.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn no_timeout_passes_through_unchanged() {
+        // make_group sets timeout: None.
+        let g = make_group("notimeout", ExecutionOrder::Parallel, true, false);
+        let mg = MatchedGroup {
+            group: &g,
+            patterns: vec![pattern_with_files("*.x", "true", vec!["a.x"])],
+        };
+        let cfg = make_config(true);
+        let cwd = std::env::current_dir().unwrap();
+        let outcomes = super::execute_all(&[mg], &cfg, &cwd).await;
+        assert_eq!(outcomes.len(), 1, "expected 1 outcome, got {outcomes:?}");
+        assert!(
+            matches!(&outcomes[0], CommandOutcome::Success { .. }),
+            "expected Success when timeout is None, got {:?}",
             outcomes[0]
         );
     }
