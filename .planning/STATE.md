@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: Ready to execute
-stopped_at: "Completed 05-04-PLAN.md (timeout enforcement: tokio::time::timeout + SIGTERM/SIGKILL escalation)"
-last_updated: "2026-04-29T09:27:20.058Z"
+status: Phase complete — ready for verification
+stopped_at: "Completed 05-05-PLAN.md (full pipeline integration: matcher + execute_all + restore-on-failure wired into run())"
+last_updated: "2026-04-29T12:41:17.505Z"
 progress:
   total_phases: 9
-  completed_phases: 4
+  completed_phases: 5
   total_plans: 12
-  completed_plans: 11
-  percent: 92
+  completed_plans: 12
+  percent: 100
 ---
 
 # Project State
@@ -58,6 +58,7 @@ Plan: 5 of 5
 | Phase 05-execution-core P02 | 8 | 2 tasks | 9 files |
 | Phase 05-execution-core P03 | 5 | 1 tasks | 1 files |
 | Phase 05-execution-core P04 | 7 | 2 tasks | 1 files |
+| Phase 05-execution-core P05 | 8 | 4 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -92,6 +93,8 @@ Recent decisions affecting current work:
 - [Phase 05-execution-core]: PathFormat enum threaded through config types/parsers/defaults; cascade hardcoded->root->group; libc 0.2 added as direct dep for sysconf access (not transitively re-exported via nix)
 - [Phase 05-execution-core]: execute_all() is infallible-by-construction; CommandNotFound mapped to CommandOutcome::Failure(exit_code=127) per POSIX shell convention; per-group cancellation is cooperative-only (Plan 04 timeout will kill in-flight); JoinSet panics + argv-build errors become synthetic Failure outcomes
 - [Phase 05-execution-core]: Plan 04 timeout: run_one manually spawns Child (not via spawn_command) to keep handle for kill; tokio::time::timeout(d, child.wait()) wraps spawn only when Group.timeout=Some(d); Unix terminate() does SIGTERM via nix + 2s grace + child.kill().await SIGKILL; Windows skips grace and calls child.kill() (TerminateProcess) directly; stderr derived from AppError::CommandTimeout.to_string() so 'timed out' substring is type-coupled
+- [Phase 05-execution-core]: Plan 05 wires lib::run() with full pipeline: load->discover->match(BEFORE backup per D-23)->backup->execute_all->print_results->restore-on-failure->cleanup; --allow-empty silently exits on both NoStagedFiles and NoFilesMatched paths; first Failure outcome maps to AppError::CommandFailed for non-zero exit (EXEC-03)
+- [Phase 05-execution-core]: GitContext::work_dir() added; panics on bare repo by design since gix::discover() filters bare repos in open(); replaces fragile git_dir().parent() fallback at lib.rs callsite
 
 ### Pending Todos
 
@@ -105,6 +108,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-29T09:27:20.055Z
-Stopped at: Completed 05-04-PLAN.md (timeout enforcement: tokio::time::timeout + SIGTERM/SIGKILL escalation)
+Last session: 2026-04-29T12:41:17.501Z
+Stopped at: Completed 05-05-PLAN.md (full pipeline integration: matcher + execute_all + restore-on-failure wired into run())
 Resume file: None
