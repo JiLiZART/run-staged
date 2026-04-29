@@ -11,11 +11,75 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::time::Duration;
 
 use tokio::process::Command;
 
 use crate::AppError;
-use crate::config::types::PathFormat;
+use crate::config::types::{Config, PathFormat};
+use crate::matcher::MatchedGroup;
+
+/// Result of one spawned command invocation.
+///
+/// One [`MatchedPattern`] can produce multiple outcomes — per-file mode emits
+/// one outcome per file, and batch mode emits one outcome per ARG_MAX chunk.
+///
+/// Outcomes are returned by [`execute_all`] regardless of whether subsequent
+/// groups were skipped due to the cross-group failure gate (D-14). The caller
+/// inspects each variant via [`CommandOutcome::is_failure`] to decide whether
+/// to roll back the staged diff (Plan 05-05).
+#[derive(Debug, Clone)]
+pub enum CommandOutcome {
+    /// Command exited with status 0.
+    Success {
+        group: String,
+        pattern: String,
+        command: String,
+        argv: Vec<String>,
+        file_count: usize,
+        duration: Duration,
+        stdout: Vec<u8>,
+    },
+    /// Command exited with non-zero status, IO error, or `CommandNotFound` (mapped to exit 127).
+    Failure {
+        group: String,
+        pattern: String,
+        command: String,
+        argv: Vec<String>,
+        file_count: usize,
+        duration: Duration,
+        exit_code: i32,
+        stdout: Vec<u8>,
+        stderr: Vec<u8>,
+    },
+    /// Cancelled before spawn because the per-group cancel flag was set by a
+    /// sibling failure under `Group.continue_on_error == false` (D-13).
+    Cancelled {
+        group: String,
+        pattern: String,
+        command: String,
+    },
+}
+
+impl CommandOutcome {
+    /// Returns true for any non-success outcome (failure or cancellation).
+    pub fn is_failure(&self) -> bool {
+        matches!(
+            self,
+            CommandOutcome::Failure { .. } | CommandOutcome::Cancelled { .. }
+        )
+    }
+}
+
+/// Execute every matched group end-to-end (TDD stub — replaced in GREEN).
+pub async fn execute_all(
+    _matched_groups: &[MatchedGroup<'_>],
+    _config: &Config,
+    _git_root: &Path,
+) -> Vec<CommandOutcome> {
+    // RED stub: returns empty so tests fail predictably.
+    Vec::new()
+}
 
 /// Parse a command string and inject file paths.
 ///
@@ -340,5 +404,336 @@ mod tests {
         let cwd = std::env::current_dir().unwrap();
         let result = spawn_command(&argv, &cwd).await;
         assert!(matches!(result, Err(AppError::ConfigInvalid(_))));
+    }
+
+    // ---- execute_all / execute_group / run_one (Plan 05-03) ----
+
+    use crate::config::types::{Config, ConfigSource, ExecutionOrder, Group};
+    use crate::matcher::{MatchedGroup, MatchedPattern};
+    use std::collections::HashMap;
+    use std::time::Instant;
+
+    fn make_group(name: &str, exec: ExecutionOrder, coe: bool, per_file: bool) -> Group {
+        Group {
+            name: name.to_string(),
+            patterns: HashMap::new(),
+            timeout: None,
+            execution_order: exec,
+            continue_on_error: coe,
+            per_file,
+            path_format: PathFormat::Relative,
+        }
+    }
+
+    fn make_config(continue_on_error: bool) -> Config {
+        Config {
+            source: ConfigSource::TomlFile(PathBuf::from("test.toml")),
+            groups: Vec::new(),
+            timeout: None,
+            execution_order: ExecutionOrder::Parallel,
+            continue_on_error,
+            per_file: false,
+        }
+    }
+
+    fn pattern_with_files(pattern: &str, command: &str, files: Vec<&str>) -> MatchedPattern {
+        MatchedPattern {
+            pattern: pattern.to_string(),
+            commands: vec![command.to_string()],
+            files: files.into_iter().map(PathBuf::from).collect(),
+        }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn parallel_wall_clock_under_sum() {
+        let g = make_group("p", ExecutionOrder::Parallel, true, false);
+        let mg = MatchedGroup {
+            group: &g,
+            patterns: vec![
+                MatchedPattern {
+                    pattern: "*.x".to_string(),
+                    commands: vec!["sh -c \"sleep 0.2\"".to_string()],
+                    files: vec![PathBuf::from("dummy.x")],
+                },
+                MatchedPattern {
+                    pattern: "*.y".to_string(),
+                    commands: vec!["sh -c \"sleep 0.2\"".to_string()],
+                    files: vec![PathBuf::from("dummy.y")],
+                },
+            ],
+        };
+        let cfg = make_config(true);
+        let cwd = std::env::current_dir().unwrap();
+        let start = Instant::now();
+        let outcomes = super::execute_all(&[mg], &cfg, &cwd).await;
+        let elapsed = start.elapsed();
+        assert_eq!(outcomes.len(), 2, "expected 2 outcomes, got {}", outcomes.len());
+        // Two parallel sleep 0.2 → wall clock should be well under 0.35s.
+        assert!(
+            elapsed.as_secs_f64() < 0.35,
+            "expected parallel wall clock < 0.35s, got {:?}",
+            elapsed
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn sequential_wall_clock_at_least_sum() {
+        let g = make_group("s", ExecutionOrder::Sequential, true, false);
+        let mg = MatchedGroup {
+            group: &g,
+            patterns: vec![
+                MatchedPattern {
+                    pattern: "*.x".to_string(),
+                    commands: vec!["sh -c \"sleep 0.2\"".to_string()],
+                    files: vec![PathBuf::from("dummy.x")],
+                },
+                MatchedPattern {
+                    pattern: "*.y".to_string(),
+                    commands: vec!["sh -c \"sleep 0.2\"".to_string()],
+                    files: vec![PathBuf::from("dummy.y")],
+                },
+            ],
+        };
+        let cfg = make_config(true);
+        let cwd = std::env::current_dir().unwrap();
+        let start = Instant::now();
+        let outcomes = super::execute_all(&[mg], &cfg, &cwd).await;
+        let elapsed = start.elapsed();
+        assert_eq!(outcomes.len(), 2);
+        // Two sequential sleep 0.2 → wall clock should be ≥ 0.35s (≈ sum 0.4).
+        assert!(
+            elapsed.as_secs_f64() >= 0.35,
+            "expected sequential wall clock >= 0.35s, got {:?}",
+            elapsed
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn exit_code_propagates_when_command_fails() {
+        let g = make_group("g", ExecutionOrder::Parallel, true, false);
+        let mg = MatchedGroup {
+            group: &g,
+            patterns: vec![
+                pattern_with_files("ok", "true", vec!["a.x"]),
+                pattern_with_files("bad", "false", vec!["b.x"]),
+            ],
+        };
+        let cfg = make_config(true);
+        let cwd = std::env::current_dir().unwrap();
+        let outcomes = super::execute_all(&[mg], &cfg, &cwd).await;
+        assert_eq!(outcomes.len(), 2);
+        let mut had_failure_with_1 = false;
+        let mut had_success = false;
+        for o in &outcomes {
+            match o {
+                CommandOutcome::Failure { exit_code, .. } => {
+                    if *exit_code == 1 {
+                        had_failure_with_1 = true;
+                    }
+                }
+                CommandOutcome::Success { .. } => {
+                    had_success = true;
+                }
+                _ => {}
+            }
+        }
+        assert!(had_failure_with_1, "expected at least one Failure with exit_code=1");
+        assert!(had_success, "expected at least one Success");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn failure_in_first_group_skips_second_group_when_global_coe_false() {
+        let g1 = make_group("g1", ExecutionOrder::Parallel, true, false);
+        let g2 = make_group("g2", ExecutionOrder::Parallel, true, false);
+        let groups = [&g1, &g2];
+        let mgs = vec![
+            MatchedGroup {
+                group: groups[0],
+                patterns: vec![pattern_with_files("p1", "false", vec!["a.x"])],
+            },
+            MatchedGroup {
+                group: groups[1],
+                patterns: vec![pattern_with_files("p2", "true", vec!["b.x"])],
+            },
+        ];
+        let cfg = make_config(false); // global continue_on_error = false
+        let cwd = std::env::current_dir().unwrap();
+        let outcomes = super::execute_all(&mgs, &cfg, &cwd).await;
+        // Only G1's failure should be present.
+        assert_eq!(outcomes.len(), 1, "expected only G1 outcomes, got {outcomes:?}");
+        for o in &outcomes {
+            match o {
+                CommandOutcome::Success { group, pattern, .. }
+                | CommandOutcome::Failure { group, pattern, .. }
+                | CommandOutcome::Cancelled { group, pattern, .. } => {
+                    assert_ne!(group, "g2", "g2 should not have been spawned");
+                    assert_ne!(pattern, "p2", "p2 should not have been spawned");
+                }
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn failure_in_first_group_runs_second_group_when_global_coe_true() {
+        let g1 = make_group("g1", ExecutionOrder::Parallel, true, false);
+        let g2 = make_group("g2", ExecutionOrder::Parallel, true, false);
+        let mgs = vec![
+            MatchedGroup {
+                group: &g1,
+                patterns: vec![pattern_with_files("p1", "false", vec!["a.x"])],
+            },
+            MatchedGroup {
+                group: &g2,
+                patterns: vec![pattern_with_files("p2", "true", vec!["b.x"])],
+            },
+        ];
+        let cfg = make_config(true); // global continue_on_error = true
+        let cwd = std::env::current_dir().unwrap();
+        let outcomes = super::execute_all(&mgs, &cfg, &cwd).await;
+        assert_eq!(outcomes.len(), 2, "expected outcomes from both groups");
+        let mut saw_g1_failure = false;
+        let mut saw_g2_success = false;
+        for o in &outcomes {
+            match o {
+                CommandOutcome::Failure { group, .. } if group == "g1" => saw_g1_failure = true,
+                CommandOutcome::Success { group, .. } if group == "g2" => saw_g2_success = true,
+                _ => {}
+            }
+        }
+        assert!(saw_g1_failure, "expected g1 failure: {outcomes:?}");
+        assert!(saw_g2_success, "expected g2 success: {outcomes:?}");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn group_cancel_flag_set_on_sibling_failure_when_group_coe_false() {
+        // Group-level continue_on_error = false: when the false sibling fails,
+        // remaining sleepers should observe the cancel flag (or finish as Failure).
+        let g = make_group("cancellable", ExecutionOrder::Parallel, false, false);
+        let mg = MatchedGroup {
+            group: &g,
+            patterns: vec![
+                pattern_with_files("slow1", "sh -c \"sleep 0.5; exit 0\"", vec!["a.x"]),
+                pattern_with_files("slow2", "sh -c \"sleep 0.5; exit 0\"", vec!["b.x"]),
+                pattern_with_files("fail", "false", vec!["c.x"]),
+            ],
+        };
+        let cfg = make_config(true);
+        let cwd = std::env::current_dir().unwrap();
+        let outcomes = super::execute_all(&[mg], &cfg, &cwd).await;
+        // Must have at least one Failure outcome.
+        let has_failure = outcomes
+            .iter()
+            .any(|o| matches!(o, CommandOutcome::Failure { .. }));
+        assert!(
+            has_failure,
+            "expected at least one Failure outcome, got {outcomes:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn per_file_spawns_one_process_per_file() {
+        let g = make_group("p", ExecutionOrder::Parallel, true, /* per_file */ true);
+        let mg = MatchedGroup {
+            group: &g,
+            patterns: vec![pattern_with_files(
+                "*.x",
+                "echo",
+                vec!["a.x", "b.x", "c.x"],
+            )],
+        };
+        let cfg = make_config(true);
+        let cwd = std::env::current_dir().unwrap();
+        let outcomes = super::execute_all(&[mg], &cfg, &cwd).await;
+        assert_eq!(outcomes.len(), 3, "expected 3 outcomes (per-file): {outcomes:?}");
+        for o in &outcomes {
+            match o {
+                CommandOutcome::Success { argv, file_count, .. } => {
+                    assert_eq!(*file_count, 1, "per-file → file_count=1");
+                    // argv = ["echo", "<one-file>"]
+                    assert_eq!(argv.len(), 2);
+                }
+                other => panic!("expected Success, got {other:?}"),
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn batch_spawns_one_process_with_all_files() {
+        let g = make_group("b", ExecutionOrder::Parallel, true, /* per_file */ false);
+        let mg = MatchedGroup {
+            group: &g,
+            patterns: vec![pattern_with_files(
+                "*.x",
+                "echo",
+                vec!["a.x", "b.x", "c.x"],
+            )],
+        };
+        let cfg = make_config(true);
+        let cwd = std::env::current_dir().unwrap();
+        let outcomes = super::execute_all(&[mg], &cfg, &cwd).await;
+        assert_eq!(outcomes.len(), 1, "expected 1 outcome (batch): {outcomes:?}");
+        match &outcomes[0] {
+            CommandOutcome::Success { argv, file_count, .. } => {
+                assert_eq!(*file_count, 3);
+                // argv = ["echo", "a.x", "b.x", "c.x"]
+                assert!(argv.contains(&"a.x".to_string()));
+                assert!(argv.contains(&"b.x".to_string()));
+                assert!(argv.contains(&"c.x".to_string()));
+            }
+            other => panic!("expected Success, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn empty_pattern_skips_spawn() {
+        let g = make_group("e", ExecutionOrder::Parallel, true, false);
+        let mg = MatchedGroup {
+            group: &g,
+            patterns: vec![MatchedPattern {
+                pattern: "*.x".to_string(),
+                commands: vec!["true".to_string()],
+                files: vec![],
+            }],
+        };
+        let cfg = make_config(true);
+        let cwd = std::env::current_dir().unwrap();
+        let outcomes = super::execute_all(&[mg], &cfg, &cwd).await;
+        assert_eq!(outcomes.len(), 0, "empty file list → zero outcomes");
+    }
+
+    #[tokio::test]
+    async fn command_not_found_produces_failure_outcome() {
+        let g = make_group("nf", ExecutionOrder::Parallel, true, false);
+        let mg = MatchedGroup {
+            group: &g,
+            patterns: vec![pattern_with_files(
+                "*.x",
+                "definitely-not-a-real-binary-zzz",
+                vec!["a.x"],
+            )],
+        };
+        let cfg = make_config(true);
+        let cwd = std::env::current_dir().unwrap();
+        let outcomes = super::execute_all(&[mg], &cfg, &cwd).await;
+        assert_eq!(outcomes.len(), 1);
+        match &outcomes[0] {
+            CommandOutcome::Failure { exit_code, stderr, .. } => {
+                assert_ne!(*exit_code, 0, "missing binary → non-zero exit_code");
+                let stderr_str = String::from_utf8_lossy(stderr);
+                assert!(
+                    stderr_str.contains("definitely-not-a-real-binary-zzz"),
+                    "expected stderr to mention binary name, got: {stderr_str}"
+                );
+            }
+            other => panic!("expected Failure, got {other:?}"),
+        }
     }
 }
