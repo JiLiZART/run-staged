@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: Ready to execute
-stopped_at: Completed 05-03-PLAN.md (execute_all + per-group cancel + cross-group gate)
-last_updated: "2026-04-29T09:17:12.297Z"
+stopped_at: "Completed 05-04-PLAN.md (timeout enforcement: tokio::time::timeout + SIGTERM/SIGKILL escalation)"
+last_updated: "2026-04-29T09:27:20.058Z"
 progress:
   total_phases: 9
   completed_phases: 4
   total_plans: 12
-  completed_plans: 10
-  percent: 83
+  completed_plans: 11
+  percent: 92
 ---
 
 # Project State
@@ -25,7 +25,7 @@ See: .planning/PROJECT.md (updated 2026-04-09)
 ## Current Position
 
 Phase: 05 (execution-core) — EXECUTING
-Plan: 4 of 5
+Plan: 5 of 5
 
 ## Performance Metrics
 
@@ -57,6 +57,7 @@ Plan: 4 of 5
 | Phase 05-execution-core P01 | 4 | 2 tasks | 2 files |
 | Phase 05-execution-core P02 | 8 | 2 tasks | 9 files |
 | Phase 05-execution-core P03 | 5 | 1 tasks | 1 files |
+| Phase 05-execution-core P04 | 7 | 2 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -90,6 +91,7 @@ Recent decisions affecting current work:
 - [Phase 05-execution-core]: AppError extended: CommandFailed/CommandTimeout reshaped to struct variants with context fields; RestoreFailed.reason boxed as dyn Error+Send+Sync (thiserror 2 reserves 'source' field name for #[source] attribute requiring StdError)
 - [Phase 05-execution-core]: PathFormat enum threaded through config types/parsers/defaults; cascade hardcoded->root->group; libc 0.2 added as direct dep for sysconf access (not transitively re-exported via nix)
 - [Phase 05-execution-core]: execute_all() is infallible-by-construction; CommandNotFound mapped to CommandOutcome::Failure(exit_code=127) per POSIX shell convention; per-group cancellation is cooperative-only (Plan 04 timeout will kill in-flight); JoinSet panics + argv-build errors become synthetic Failure outcomes
+- [Phase 05-execution-core]: Plan 04 timeout: run_one manually spawns Child (not via spawn_command) to keep handle for kill; tokio::time::timeout(d, child.wait()) wraps spawn only when Group.timeout=Some(d); Unix terminate() does SIGTERM via nix + 2s grace + child.kill().await SIGKILL; Windows skips grace and calls child.kill() (TerminateProcess) directly; stderr derived from AppError::CommandTimeout.to_string() so 'timed out' substring is type-coupled
 
 ### Pending Todos
 
@@ -103,6 +105,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-29T09:17:12.295Z
-Stopped at: Completed 05-03-PLAN.md (execute_all + per-group cancel + cross-group gate)
+Last session: 2026-04-29T09:27:20.055Z
+Stopped at: Completed 05-04-PLAN.md (timeout enforcement: tokio::time::timeout + SIGTERM/SIGKILL escalation)
 Resume file: None
