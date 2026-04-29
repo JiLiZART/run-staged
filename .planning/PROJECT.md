@@ -20,8 +20,8 @@ Run linting/formatting commands on staged files faster than lint-staged, with ze
 
 - [x] Config discovery and parsing (TOML, JSON, package.json) — Validated in Phase 2: Config Core
 - [x] Git staged file detection via gix — Validated in Phase 4: Git Integration
-- [ ] Glob pattern matching of staged files to command groups
-- [ ] Parallel and sequential command execution with timeout
+- [x] Glob pattern matching of staged files to command groups — Validated in Phase 5: Execution Core
+- [x] Parallel and sequential command execution with timeout — Validated in Phase 5: Execution Core
 - [ ] Live ratatui TUI with per-command progress, spinners, elapsed time
 - [x] CLI argument parsing (--config, --quiet, --unstaged, --allow-empty, --stash, --revert) — Validated in Phase 4: Git Integration (wired --unstaged)
 - [x] Typed error handling with user-friendly messages — Validated in Phase 1: Foundation
@@ -43,6 +43,7 @@ Run linting/formatting commands on staged files faster than lint-staged, with ze
 - Phase 2 complete — config module with types, TOML/JSON parsers, priority-based discovery (CWD to git root), package.json support, 40 tests
 - Phase 3 complete — advanced config: per-group overrides, execution_behavior (per-file/batch), path_format (relative/absolute), declaration-order iteration
 - Phase 4 complete — git integration: GitContext with staged_files/unstaged_files via gix, patch-based backup/restore/cleanup in .git/, --unstaged flag wired end-to-end, 74 tests
+- Phase 5 complete — execution core: glob matcher with matchBase + negation, commands.rs primitives (build_argv, chunk_files, spawn_command), execute_all orchestrator with per-group parallel/sequential dispatch + Arc<AtomicBool> cancellation + cross-group failure gate, per-spawn timeout with SIGTERM/SIGKILL escalation, run() integration with restore-on-failure, 139 tests across 5 suites. Two backlog items filed (999.1 dogfood matcher bug, 999.2 ROADMAP drift)
 - CI workflow replaced: NAPI-RS removed, now stable Rust with fmt + clippy + test
 - Pre-commit hook (husky + lint-staged) is broken due to missing package.json
 - TODO.md and ROADMAP.md contain detailed implementation specs for all layers
@@ -89,4 +90,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-24 after Phase 4: Git Integration completion*
+*Last updated: 2026-04-29 after Phase 5: Execution Core completion*
