@@ -88,12 +88,15 @@ fn test_binary_exits_nonzero_without_config() {
 fn test_binary_loads_toml_config() {
     let dir = make_temp_dir("toml-config");
     make_real_git_repo(&dir);
+    // Use `echo` so the command actually exists on every CI runner; the
+    // pre-Plan-05 assertion strings (`"Loaded config from"`, `"1 pattern(s)"`)
+    // came from a debug eprintln block that Plan 05 removes — replaced here
+    // with success-line glyph + exit-0 assertions.
     write_file(
         &dir,
         ".fast-staged.toml",
-        "[patterns]\n\"*.rs\" = [\"cargo fmt\"]\n",
+        "[patterns]\n\"*.rs\" = [\"echo\"]\n",
     );
-    // Stage a file so staged_files() returns a non-empty list.
     stage_file(&dir, "main.rs", "fn main() {}");
 
     let output = Command::new(binary())
@@ -106,14 +109,10 @@ fn test_binary_loads_toml_config() {
         "Binary should exit 0 when valid TOML config found and files are staged. stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        stderr.contains("Loaded config from"),
-        "Expected 'Loaded config from' in stderr, got: {stderr}"
-    );
-    assert!(
-        stderr.contains("1 pattern(s)"),
-        "Expected '1 pattern(s)' in stderr, got: {stderr}"
+        stdout.contains("✓"),
+        "Expected ✓ success-line glyph in stdout, got stdout: {stdout}"
     );
 
     fs::remove_dir_all(&dir).ok();
@@ -126,9 +125,8 @@ fn test_binary_loads_json_config() {
     write_file(
         &dir,
         ".fast-staged.json",
-        "{\"patterns\": {\"*.js\": [\"eslint\"]}}",
+        "{\"patterns\": {\"*.js\": [\"echo\"]}}",
     );
-    // Stage a file so staged_files() succeeds.
     stage_file(&dir, "index.js", "console.log('hi');");
 
     let output = Command::new(binary())
@@ -141,10 +139,10 @@ fn test_binary_loads_json_config() {
         "Binary should exit 0 when valid JSON config found and files are staged. stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        stderr.contains("Loaded config from"),
-        "Expected 'Loaded config from' in stderr, got: {stderr}"
+        stdout.contains("✓"),
+        "Expected ✓ success-line glyph in stdout, got stdout: {stdout}"
     );
 
     fs::remove_dir_all(&dir).ok();
@@ -234,19 +232,17 @@ fn test_binary_with_unstaged_flag_shows_unstaged_files() {
         .expect("run binary with --unstaged");
 
     let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
         output.status.success(),
         "Binary should exit 0 when --unstaged finds modified files. stderr: {stderr}"
     );
-    // With --unstaged, the label must reflect unstaged mode, proving the flag
-    // was detected and the unstaged_files() branch was taken.
+    // Plan 05 removed the Phase 4 debug eprintln block. We now confirm the
+    // --unstaged branch was taken by asserting that a success line was emitted
+    // for the pattern matching the modified file (echo → ✓ glyph in stdout).
     assert!(
-        stderr.contains("Unstaged files"),
-        "Expected 'Unstaged files' label in stderr with --unstaged, got: {stderr}"
-    );
-    assert!(
-        stderr.contains("tracked.txt"),
-        "Expected 'tracked.txt' in stderr with --unstaged, got: {stderr}"
+        stdout.contains("✓"),
+        "Expected ✓ success-line glyph in stdout with --unstaged, got stdout: {stdout}"
     );
 
     fs::remove_dir_all(&dir).ok();
@@ -271,17 +267,16 @@ fn test_binary_without_unstaged_flag_shows_staged_files() {
         .expect("run binary without --unstaged");
 
     let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
         output.status.success(),
         "Binary should exit 0 with staged files. stderr: {stderr}"
     );
+    // Plan 05 removed the Phase 4 debug eprintln block. The default (staged)
+    // branch is now confirmed by the success-line glyph in stdout.
     assert!(
-        stderr.contains("Staged files"),
-        "Expected 'Staged files' label in stderr without --unstaged, got: {stderr}"
-    );
-    assert!(
-        stderr.contains("staged.txt"),
-        "Expected 'staged.txt' in stderr, got: {stderr}"
+        stdout.contains("✓"),
+        "Expected ✓ success-line glyph in stdout (staged branch), got stdout: {stdout}"
     );
 
     fs::remove_dir_all(&dir).ok();
