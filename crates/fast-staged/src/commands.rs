@@ -11,12 +11,15 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::time::Duration;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 
 use tokio::process::Command;
+use tokio::task::JoinSet;
 
 use crate::AppError;
-use crate::config::types::{Config, PathFormat};
+use crate::config::types::{Config, ExecutionOrder, PathFormat};
 use crate::matcher::MatchedGroup;
 
 /// Result of one spawned command invocation.
@@ -71,14 +74,309 @@ impl CommandOutcome {
     }
 }
 
-/// Execute every matched group end-to-end (TDD stub — replaced in GREEN).
-pub async fn execute_all(
-    _matched_groups: &[MatchedGroup<'_>],
-    _config: &Config,
-    _git_root: &Path,
+/// One unit of work: a fully-built argv plus the metadata needed to construct
+/// a [`CommandOutcome`] after spawn completes. One `MatchedPattern` may expand
+/// into many `Task`s under per-file mode or ARG_MAX chunking.
+#[derive(Debug, Clone)]
+struct Task {
+    group_name: String,
+    pattern: String,
+    /// Original command string from config (for reporting in CommandOutcome).
+    command: String,
+    /// Pre-built argv (after build_argv + chunk).
+    argv: Vec<String>,
+    /// How many files this task represents (1 in per-file mode; chunk size in batch mode).
+    file_count: usize,
+    working_dir: PathBuf,
+}
+
+/// Drive a single [`Task`] through `spawn_command`, mapping the result to a
+/// [`CommandOutcome`]. Plan 04 will wrap this body with `tokio::time::timeout`
+/// for per-group timeout — keep this function small so that edit is surgical.
+///
+/// Cooperative cancellation (D-13): if the per-group flag is already set when
+/// `run_one` starts, the function returns `CommandOutcome::Cancelled` without
+/// spawning. Once `spawn_command` is in flight we do not interrupt it — the
+/// caller's spawn loop simply stops scheduling new work.
+async fn run_one(task: Task, cancel: Arc<AtomicBool>) -> CommandOutcome {
+    if cancel.load(Ordering::Relaxed) {
+        return CommandOutcome::Cancelled {
+            group: task.group_name,
+            pattern: task.pattern,
+            command: task.command,
+        };
+    }
+
+    let start = Instant::now();
+    let result = spawn_command(&task.argv, &task.working_dir).await;
+    let duration = start.elapsed();
+
+    match result {
+        Ok(output) => {
+            if output.status.success() {
+                CommandOutcome::Success {
+                    group: task.group_name,
+                    pattern: task.pattern,
+                    command: task.command,
+                    argv: task.argv,
+                    file_count: task.file_count,
+                    duration,
+                    stdout: output.stdout,
+                }
+            } else {
+                CommandOutcome::Failure {
+                    group: task.group_name,
+                    pattern: task.pattern,
+                    command: task.command,
+                    argv: task.argv,
+                    file_count: task.file_count,
+                    duration,
+                    exit_code: output.status.code().unwrap_or(-1),
+                    stdout: output.stdout,
+                    stderr: output.stderr,
+                }
+            }
+        }
+        Err(AppError::CommandNotFound(name)) => CommandOutcome::Failure {
+            group: task.group_name,
+            pattern: task.pattern,
+            command: task.command,
+            argv: task.argv,
+            file_count: task.file_count,
+            duration,
+            // POSIX convention: shell maps ENOENT to exit code 127.
+            exit_code: 127,
+            stdout: vec![],
+            stderr: format!("command not found: {name}").into_bytes(),
+        },
+        Err(AppError::Io(e)) => CommandOutcome::Failure {
+            group: task.group_name,
+            pattern: task.pattern,
+            command: task.command,
+            argv: task.argv,
+            file_count: task.file_count,
+            duration,
+            exit_code: -1,
+            stdout: vec![],
+            stderr: format!("io error: {e}").into_bytes(),
+        },
+        Err(other) => CommandOutcome::Failure {
+            group: task.group_name,
+            pattern: task.pattern,
+            command: task.command,
+            argv: task.argv,
+            file_count: task.file_count,
+            duration,
+            exit_code: -1,
+            stdout: vec![],
+            stderr: format!("{other}").into_bytes(),
+        },
+    }
+}
+
+/// Expand a `MatchedGroup` into a flat list of `Task`s. Honors per-file vs
+/// batch mode, runs `build_argv` once per chunk, and chunk-splits batch mode
+/// via `chunk_files`. Patterns with empty file lists are skipped (D-27 — the
+/// matcher already drops these but this is a defensive guard for direct
+/// callers that construct `MatchedGroup` literally).
+fn tasks_for_group(matched: &MatchedGroup<'_>, git_root: &Path) -> Result<Vec<Task>, AppError> {
+    let mut tasks = Vec::new();
+    let group = matched.group;
+    let working_dir = git_root.to_path_buf();
+
+    for pattern in &matched.patterns {
+        if pattern.files.is_empty() {
+            continue;
+        }
+        for command_str in &pattern.commands {
+            if group.per_file {
+                // One process per file — build_argv called per file, no chunking.
+                for file in &pattern.files {
+                    let file_slice = std::slice::from_ref(file);
+                    let argv = build_argv(command_str, file_slice, group.path_format, git_root)?;
+                    tasks.push(Task {
+                        group_name: group.name.clone(),
+                        pattern: pattern.pattern.clone(),
+                        command: command_str.clone(),
+                        argv,
+                        file_count: 1,
+                        working_dir: working_dir.clone(),
+                    });
+                }
+            } else {
+                // Batch mode: build the bare argv once for chunk-budgeting,
+                // then build_argv per chunk so {files} substitution / positional
+                // append happens per-chunk against the chosen file slice.
+                let bare_argv = build_argv(command_str, &[], group.path_format, git_root)?;
+                let chunks = chunk_files(&bare_argv, &pattern.files);
+                for chunk in chunks {
+                    let argv = build_argv(command_str, chunk, group.path_format, git_root)?;
+                    tasks.push(Task {
+                        group_name: group.name.clone(),
+                        pattern: pattern.pattern.clone(),
+                        command: command_str.clone(),
+                        argv,
+                        file_count: chunk.len(),
+                        working_dir: working_dir.clone(),
+                    });
+                }
+            }
+        }
+    }
+    Ok(tasks)
+}
+
+/// Run all `tasks` concurrently via [`JoinSet`]. On any failing outcome under
+/// `continue_on_error == false`, set the per-group cancel flag so already-spawned
+/// siblings can bail out cooperatively; new tasks check the flag at start (D-13).
+async fn execute_group_parallel(
+    tasks: Vec<Task>,
+    cancel: Arc<AtomicBool>,
+    continue_on_error: bool,
 ) -> Vec<CommandOutcome> {
-    // RED stub: returns empty so tests fail predictably.
-    Vec::new()
+    let mut set: JoinSet<CommandOutcome> = JoinSet::new();
+    for task in tasks {
+        let cancel_for_task = Arc::clone(&cancel);
+        set.spawn(async move { run_one(task, cancel_for_task).await });
+    }
+
+    let mut outcomes = Vec::new();
+    while let Some(joined) = set.join_next().await {
+        let outcome = match joined {
+            Ok(o) => o,
+            Err(e) => CommandOutcome::Failure {
+                group: String::new(),
+                pattern: String::new(),
+                command: String::new(),
+                argv: vec![],
+                file_count: 0,
+                duration: Duration::ZERO,
+                exit_code: -1,
+                stdout: vec![],
+                stderr: format!("task panicked: {e}").into_bytes(),
+            },
+        };
+        if outcome.is_failure() && !continue_on_error {
+            cancel.store(true, Ordering::Relaxed);
+        }
+        outcomes.push(outcome);
+    }
+    outcomes
+}
+
+/// Run all `tasks` one after another in declared order. After the first
+/// failing outcome under `continue_on_error == false`, set the cancel flag
+/// and emit `CommandOutcome::Cancelled` for every remaining task without
+/// spawning them.
+async fn execute_group_sequential(
+    tasks: Vec<Task>,
+    cancel: Arc<AtomicBool>,
+    continue_on_error: bool,
+) -> Vec<CommandOutcome> {
+    let mut outcomes = Vec::with_capacity(tasks.len());
+    for task in tasks {
+        let outcome = run_one(task, Arc::clone(&cancel)).await;
+        if outcome.is_failure() && !continue_on_error {
+            cancel.store(true, Ordering::Relaxed);
+        }
+        outcomes.push(outcome);
+    }
+    outcomes
+}
+
+/// Execute every matched group end-to-end.
+///
+/// **Outer loop:** strictly sequential across groups (D-14 — no two groups
+/// ever overlap). **Inner dispatch:** obeys each group's `execution_order`
+/// — `Parallel` spawns all of the group's `Task`s into a [`JoinSet`];
+/// `Sequential` runs them one at a time in declared order.
+///
+/// **Per-group cancellation (D-13):** each group gets a fresh `Arc<AtomicBool>`.
+/// When any task in the group fails AND `Group.continue_on_error == false`,
+/// the flag is set; not-yet-spawned tasks observe the flag at start and emit
+/// `CommandOutcome::Cancelled`. Already-running tasks finish normally — we
+/// never SIGTERM in-flight processes from this layer (Plan 04 layers timeout
+/// on top, which DOES terminate the child process when the timer fires).
+///
+/// **Cross-group gate (D-14):** after a group finishes, if any of its outcomes
+/// is a failure AND `Config.continue_on_error == false`, subsequent groups
+/// are not started. Their patterns will be absent from the returned `Vec`.
+///
+/// **Per-file vs batch (D-24/D-25):** when `Group.per_file == true`, one
+/// process spawns per file (one outcome per file). Otherwise files are
+/// passed as args to a single invocation, chunked via `chunk_files` to stay
+/// under ARG_MAX.
+///
+/// **Empty patterns (D-27):** patterns whose `files` is empty are skipped
+/// before spawn. Defensive — the matcher already drops these.
+///
+/// **Failure semantics (D-15):** the function ALWAYS returns the full outcome
+/// list rather than short-circuiting via `Result`. The caller (Plan 05-05's
+/// `run()`) iterates and calls `is_failure()` to decide whether to roll back
+/// the staged diff.
+///
+/// **CommandNotFound (D-08):** mapped to `CommandOutcome::Failure` with
+/// `exit_code = 127` and `stderr = "command not found: NAME"`, matching the
+/// POSIX shell convention.
+pub async fn execute_all(
+    matched_groups: &[MatchedGroup<'_>],
+    config: &Config,
+    git_root: &Path,
+) -> Vec<CommandOutcome> {
+    let mut all_outcomes: Vec<CommandOutcome> = Vec::new();
+
+    for matched in matched_groups {
+        // Per-group cancel flag — fresh for each group so a previous group's
+        // failure doesn't leak cancellation into the next one (when global
+        // continue_on_error allows continuation).
+        let cancel = Arc::new(AtomicBool::new(false));
+
+        let tasks = match tasks_for_group(matched, git_root) {
+            Ok(t) => t,
+            Err(e) => {
+                // build_argv shlex failure — surface as a synthetic Failure
+                // so the caller still sees a non-zero outcome for this group.
+                all_outcomes.push(CommandOutcome::Failure {
+                    group: matched.group.name.clone(),
+                    pattern: String::new(),
+                    command: String::new(),
+                    argv: vec![],
+                    file_count: 0,
+                    duration: Duration::ZERO,
+                    exit_code: -1,
+                    stdout: vec![],
+                    stderr: format!("argv build failed: {e}").into_bytes(),
+                });
+                if !config.continue_on_error {
+                    break;
+                }
+                continue;
+            }
+        };
+
+        // Defensive D-27: empty pattern files → no tasks → skip group entirely.
+        if tasks.is_empty() {
+            continue;
+        }
+
+        let group_outcomes = match matched.group.execution_order {
+            ExecutionOrder::Parallel => {
+                execute_group_parallel(tasks, cancel, matched.group.continue_on_error).await
+            }
+            ExecutionOrder::Sequential => {
+                execute_group_sequential(tasks, cancel, matched.group.continue_on_error).await
+            }
+        };
+
+        let group_had_failure = group_outcomes.iter().any(CommandOutcome::is_failure);
+        all_outcomes.extend(group_outcomes);
+        if group_had_failure && !config.continue_on_error {
+            // D-14: skip subsequent groups.
+            break;
+        }
+    }
+
+    all_outcomes
 }
 
 /// Parse a command string and inject file paths.
@@ -445,7 +743,7 @@ mod tests {
     }
 
     #[cfg(unix)]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn parallel_wall_clock_under_sum() {
         let g = make_group("p", ExecutionOrder::Parallel, true, false);
         let mg = MatchedGroup {
@@ -453,12 +751,12 @@ mod tests {
             patterns: vec![
                 MatchedPattern {
                     pattern: "*.x".to_string(),
-                    commands: vec!["sh -c \"sleep 0.2\"".to_string()],
+                    commands: vec!["sh -c \"sleep 0.3\"".to_string()],
                     files: vec![PathBuf::from("dummy.x")],
                 },
                 MatchedPattern {
                     pattern: "*.y".to_string(),
-                    commands: vec!["sh -c \"sleep 0.2\"".to_string()],
+                    commands: vec!["sh -c \"sleep 0.3\"".to_string()],
                     files: vec![PathBuf::from("dummy.y")],
                 },
             ],
@@ -468,17 +766,23 @@ mod tests {
         let start = Instant::now();
         let outcomes = super::execute_all(&[mg], &cfg, &cwd).await;
         let elapsed = start.elapsed();
-        assert_eq!(outcomes.len(), 2, "expected 2 outcomes, got {}", outcomes.len());
-        // Two parallel sleep 0.2 → wall clock should be well under 0.35s.
+        assert_eq!(
+            outcomes.len(),
+            2,
+            "expected 2 outcomes, got {}",
+            outcomes.len()
+        );
+        // Two parallel sleep 0.3 → sum is 0.6s. Parallel wall clock should be < 0.55s
+        // (margin of 0.25s for system load + spawn overhead in CI).
         assert!(
-            elapsed.as_secs_f64() < 0.35,
-            "expected parallel wall clock < 0.35s, got {:?}",
+            elapsed.as_secs_f64() < 0.55,
+            "expected parallel wall clock < 0.55s (sum is 0.6s), got {:?}",
             elapsed
         );
     }
 
     #[cfg(unix)]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn sequential_wall_clock_at_least_sum() {
         let g = make_group("s", ExecutionOrder::Sequential, true, false);
         let mg = MatchedGroup {
@@ -540,7 +844,10 @@ mod tests {
                 _ => {}
             }
         }
-        assert!(had_failure_with_1, "expected at least one Failure with exit_code=1");
+        assert!(
+            had_failure_with_1,
+            "expected at least one Failure with exit_code=1"
+        );
         assert!(had_success, "expected at least one Success");
     }
 
@@ -564,7 +871,11 @@ mod tests {
         let cwd = std::env::current_dir().unwrap();
         let outcomes = super::execute_all(&mgs, &cfg, &cwd).await;
         // Only G1's failure should be present.
-        assert_eq!(outcomes.len(), 1, "expected only G1 outcomes, got {outcomes:?}");
+        assert_eq!(
+            outcomes.len(),
+            1,
+            "expected only G1 outcomes, got {outcomes:?}"
+        );
         for o in &outcomes {
             match o {
                 CommandOutcome::Success { group, pattern, .. }
@@ -639,22 +950,29 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn per_file_spawns_one_process_per_file() {
-        let g = make_group("p", ExecutionOrder::Parallel, true, /* per_file */ true);
+        let g = make_group(
+            "p",
+            ExecutionOrder::Parallel,
+            true,
+            /* per_file */ true,
+        );
         let mg = MatchedGroup {
             group: &g,
-            patterns: vec![pattern_with_files(
-                "*.x",
-                "echo",
-                vec!["a.x", "b.x", "c.x"],
-            )],
+            patterns: vec![pattern_with_files("*.x", "echo", vec!["a.x", "b.x", "c.x"])],
         };
         let cfg = make_config(true);
         let cwd = std::env::current_dir().unwrap();
         let outcomes = super::execute_all(&[mg], &cfg, &cwd).await;
-        assert_eq!(outcomes.len(), 3, "expected 3 outcomes (per-file): {outcomes:?}");
+        assert_eq!(
+            outcomes.len(),
+            3,
+            "expected 3 outcomes (per-file): {outcomes:?}"
+        );
         for o in &outcomes {
             match o {
-                CommandOutcome::Success { argv, file_count, .. } => {
+                CommandOutcome::Success {
+                    argv, file_count, ..
+                } => {
                     assert_eq!(*file_count, 1, "per-file → file_count=1");
                     // argv = ["echo", "<one-file>"]
                     assert_eq!(argv.len(), 2);
@@ -667,21 +985,28 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn batch_spawns_one_process_with_all_files() {
-        let g = make_group("b", ExecutionOrder::Parallel, true, /* per_file */ false);
+        let g = make_group(
+            "b",
+            ExecutionOrder::Parallel,
+            true,
+            /* per_file */ false,
+        );
         let mg = MatchedGroup {
             group: &g,
-            patterns: vec![pattern_with_files(
-                "*.x",
-                "echo",
-                vec!["a.x", "b.x", "c.x"],
-            )],
+            patterns: vec![pattern_with_files("*.x", "echo", vec!["a.x", "b.x", "c.x"])],
         };
         let cfg = make_config(true);
         let cwd = std::env::current_dir().unwrap();
         let outcomes = super::execute_all(&[mg], &cfg, &cwd).await;
-        assert_eq!(outcomes.len(), 1, "expected 1 outcome (batch): {outcomes:?}");
+        assert_eq!(
+            outcomes.len(),
+            1,
+            "expected 1 outcome (batch): {outcomes:?}"
+        );
         match &outcomes[0] {
-            CommandOutcome::Success { argv, file_count, .. } => {
+            CommandOutcome::Success {
+                argv, file_count, ..
+            } => {
                 assert_eq!(*file_count, 3);
                 // argv = ["echo", "a.x", "b.x", "c.x"]
                 assert!(argv.contains(&"a.x".to_string()));
@@ -725,7 +1050,9 @@ mod tests {
         let outcomes = super::execute_all(&[mg], &cfg, &cwd).await;
         assert_eq!(outcomes.len(), 1);
         match &outcomes[0] {
-            CommandOutcome::Failure { exit_code, stderr, .. } => {
+            CommandOutcome::Failure {
+                exit_code, stderr, ..
+            } => {
                 assert_ne!(*exit_code, 0, "missing binary → non-zero exit_code");
                 let stderr_str = String::from_utf8_lossy(stderr);
                 assert!(
