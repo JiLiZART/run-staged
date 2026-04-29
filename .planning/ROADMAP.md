@@ -171,6 +171,29 @@ Plans:
 - [x] 04-02-PLAN.md — Backup/restore/cleanup pipeline wired into run()
 - [ ] 04-03-PLAN.md — Wire --unstaged flag (gap closure for GIT-05)
 
+## Backlog
+
+### Phase 999.1: Phase 5 dogfood matcher/runner bug
+
+**Source:** Discovered via `.husky/pre-commit` running `./target/debug/fast-staged` on docs-only commit at end of Phase 5 verification.
+
+**Symptom:** With staged files = `.planning/STATE.md` + `.planning/phases/05-execution-core/05-VERIFICATION.md` (zero `.rs` files), the binary still executes `cargo fmt` (configured under `*.rs` and `**/*.rs` patterns in `fast-staged.toml`). Reproducible — re-runs hit timeout in 1s instead of NoFilesMatched-skip.
+
+**Suspected root cause:** Either (a) matcher matches non-`.rs` files against `*.rs` patterns, or (b) execution layer runs a pattern's commands even when the matched file list is empty (D-27 empty-pattern-skip not actually wired).
+
+**Why missed:** Phase 5 verifier ran unit + integration tests (139 passing). Tests cover matcher in isolation and execution end-to-end with synthesized matches. No test exercises the "config has `.rs` patterns + zero `.rs` staged" case end-to-end through the binary.
+
+### Phase 999.2: ROADMAP.md Phase 5 entry drift
+
+**Source:** Verifier informational note + manual inspection.
+
+**Symptoms:**
+- Phase 5 "Plans:" list (~line 169-172) lists Phase 4 plan filenames (`04-01-PLAN.md`, `04-02-PLAN.md`, `04-03-PLAN.md`) instead of `05-01..05-05`
+- Phase 5 row in Progress table reads `0/TBD Not started` despite all 5 plans + verification complete
+- `gsd-tools phase complete 05` updated frontmatter and STATE but did not rewrite the Phase 5 plan list / progress row in ROADMAP body
+
+**Fix scope:** Update Phase 5 entry plan list to actual `05-01..05-05` filenames, set Progress row to `5/5 Complete 2026-04-29`. Possibly a `gsd-tools` bug — investigate whether `phase complete` is supposed to do this rewrite.
+
 ## Progress
 
 **Execution Order:**
