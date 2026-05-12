@@ -396,6 +396,55 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    #[test]
+    fn test_staged_files_ignores_committed_files() {
+        let _lock = CWD_LOCK.lock().unwrap();
+        // Reproducer for Phase 999.1 dogfood bug: in a repo with prior HEAD
+        // commits, staged_files() must return ONLY files whose index entry
+        // differs from HEAD — not every tracked file.
+        let dir = make_real_git_repo("staged-ignores-committed");
+
+        // Commit a .rs file so it becomes part of HEAD.
+        stage_file(&dir, "committed.rs", "fn main() {}\n");
+        commit_all(&dir, "initial commit");
+
+        // Now stage a brand-new .md file. The committed .rs file is
+        // unchanged in the worktree and unchanged in the index.
+        stage_file(&dir, "new.md", "# title\n");
+
+        let prev = std::env::current_dir().unwrap();
+        std::env::set_current_dir(&dir).unwrap();
+
+        let ctx = GitContext::open().unwrap();
+        let files = ctx.staged_files().unwrap();
+
+        let names: Vec<String> = files
+            .iter()
+            .map(|p| p.to_string_lossy().to_string())
+            .collect();
+
+        assert_eq!(
+            files.len(),
+            1,
+            "expected exactly 1 staged file (new.md), got {:?}",
+            names
+        );
+        assert_eq!(
+            files[0],
+            PathBuf::from("new.md"),
+            "expected new.md, got {:?}",
+            names
+        );
+        assert!(
+            !names.contains(&"committed.rs".to_string()),
+            "committed.rs must NOT be in staged_files() result (it is unchanged vs HEAD), got {:?}",
+            names
+        );
+
+        std::env::set_current_dir(prev).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     // -------------------------------------------------------------------------
     // unstaged_files() tests
     // -------------------------------------------------------------------------
