@@ -117,7 +117,7 @@ Plans:
 **Plans:** 2 plans
 
 Plans:
-- [ ] 06-01-PLAN.md — clap derive Cli + lib::run config_path: Option<PathBuf> + Cargo.toml description
+- [x] 06-01-PLAN.md — clap derive Cli + lib::run config_path: Option<PathBuf> + Cargo.toml description
 - [ ] 06-02-PLAN.md — Six new integration tests covering --version/--help/unknown-flag/--config/--quiet
 
 ### Phase 7: Signal Handling & Resilience
