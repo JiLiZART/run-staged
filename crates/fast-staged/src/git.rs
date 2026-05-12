@@ -39,16 +39,81 @@ impl GitContext {
             .expect("GitContext::work_dir called on a bare repository")
     }
 
-    /// Return the list of staged files (index stage-0 entries).
+    /// Return the list of files whose index entry differs from the HEAD tree
+    /// entry (added / modified / renamed / copied — i.e. the set produced by
+    /// `git diff --cached --name-only -z --diff-filter=ACMR`). Deleted entries
+    /// are excluded: they don't exist on disk so linters/formatters cannot
+    /// operate on them. This is the set a user just `git add`-ed for the
+    /// current commit cycle, NOT every tracked file.
     ///
-    /// Uses `open_index()` (fresh read from disk) rather than the lazily-cached
-    /// `index()` accessor — required for correctness inside a pre-commit hook.
+    /// In an unborn-HEAD repo (no commits yet) there is nothing to diff
+    /// against, so we fall back to listing all stage-0 (Unconflicted) index
+    /// entries — which in that case IS the change set.
     ///
-    /// Returns `AppError::NoStagedFiles` when no stage-0 entries exist, including
-    /// when no index file has been created yet (fresh repo with no `git add`).
+    /// Uses `open_index()` (fresh read from disk) for the fallback path —
+    /// required for correctness inside a pre-commit hook.
+    ///
+    /// Returns `AppError::NoStagedFiles` when the diff is empty (or, in the
+    /// unborn-HEAD fallback, when there are no stage-0 entries), including
+    /// when no index file has been created yet.
     pub fn staged_files(&self) -> Result<Vec<PathBuf>, AppError> {
-        // In a fresh repo with no commits and no staged files, the index file may
-        // not exist yet. Treat that as "no staged files" rather than a hard error.
+        // Branch on HEAD existence. In an unborn-HEAD repo there is no tree
+        // to diff against — fall back to iterating stage-0 index entries
+        // (which IS the change set when there are no prior commits).
+        if self.repo.head_id().is_err() {
+            return self.staged_files_unborn_head();
+        }
+
+        // HEAD exists — shell out to `git diff --cached`. Same trust posture
+        // as backup()/restore() in this file.
+        // -z gives NUL-separated paths (binary-safe for non-UTF-8 filenames).
+        // --diff-filter=ACMR: Added/Copied/Modified/Renamed only; D (deleted)
+        // entries are excluded because they don't exist on disk.
+        let work_dir = self
+            .repo
+            .workdir()
+            .ok_or_else(|| AppError::Git("bare repositories are not supported".to_string()))?;
+
+        let output = std::process::Command::new("git")
+            .args([
+                "diff",
+                "--cached",
+                "--name-only",
+                "-z",
+                "--diff-filter=ACMR",
+            ])
+            .current_dir(work_dir)
+            .output()
+            .map_err(|e| AppError::Git(format!("git diff --cached failed: {e}")))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(AppError::Git(format!("git diff --cached failed: {stderr}")));
+        }
+
+        // Parse NUL-separated output. Trailing NUL after the last entry is
+        // normal — filter empties to drop it.
+        let files: Vec<PathBuf> = output
+            .stdout
+            .split(|&b| b == 0)
+            .filter(|chunk| !chunk.is_empty())
+            .map(|chunk| {
+                let s = String::from_utf8_lossy(chunk);
+                PathBuf::from(s.as_ref())
+            })
+            .collect();
+
+        if files.is_empty() {
+            return Err(AppError::NoStagedFiles);
+        }
+
+        Ok(files)
+    }
+
+    /// Unborn-HEAD fallback for `staged_files()`. Lists all stage-0 index
+    /// entries — the original behavior, correct only when there is no HEAD
+    /// to diff against.
+    fn staged_files_unborn_head(&self) -> Result<Vec<PathBuf>, AppError> {
         let index = match self.repo.open_index() {
             Ok(idx) => idx,
             Err(_) => return Err(AppError::NoStagedFiles),
