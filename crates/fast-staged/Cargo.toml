@@ -1,7 +1,8 @@
 [package]
-name    = "fast-staged"
-version = "0.1.0"
-edition = "2024"
+description = "A fast Rust replacement for lint-staged. Run configured commands on staged files."
+edition     = "2024"
+name        = "fast-staged"
+version     = "0.1.0"
 
 [[bin]]
 name = "fast-staged"
