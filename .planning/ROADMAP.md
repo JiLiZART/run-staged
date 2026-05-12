@@ -118,7 +118,7 @@ Plans:
 
 Plans:
 - [x] 06-01-PLAN.md — clap derive Cli + lib::run config_path: Option<PathBuf> + Cargo.toml description
-- [ ] 06-02-PLAN.md — Six new integration tests covering --version/--help/unknown-flag/--config/--quiet
+- [x] 06-02-PLAN.md — Six new integration tests covering --version/--help/unknown-flag/--config/--quiet
 
 ### Phase 7: Signal Handling & Resilience
 **Goal**: Users can safely interrupt the tool at any time without orphaned processes or a corrupted terminal
