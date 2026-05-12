@@ -12,14 +12,22 @@ pub use error::AppError;
 /// restored on failure.
 ///
 /// Flags:
+/// - `config_path`: explicit path to a config file. When `Some`, auto-discovery is bypassed
+///   and the file at that exact path is loaded (D-02, D-08). When `None`, the Phase 2
+///   CWD->git-root walk runs as before.
 /// - `unstaged`: operate on modified-but-not-staged files. Skips backup/restore/cleanup
 ///   because there is no staged diff to preserve (Phase 4 D-12).
 /// - `allow_empty`: when true, exit silently with `Ok(())` if there are no staged files
 ///   OR if no staged files match any configured pattern (D-21, D-22, D-23). Skips
 ///   backup and cleanup entirely in the no-op path.
 /// - `quiet`: suppress success summary lines. Failure boxes always print (D-12).
-pub async fn run(unstaged: bool, allow_empty: bool, quiet: bool) -> Result<(), AppError> {
-    let config = config::load_config(None)?;
+pub async fn run(
+    config_path: Option<std::path::PathBuf>,
+    unstaged: bool,
+    allow_empty: bool,
+    quiet: bool,
+) -> Result<(), AppError> {
+    let config = config::load_config(config_path.as_deref())?;
     let git_ctx = git::GitContext::open()?;
 
     // Step 1: discover files. --allow-empty suppresses NoStagedFiles → Ok(()) silently.
