@@ -249,3 +249,137 @@ fn no_allow_empty_clean_repo_exits_nonzero() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn version_flag() {
+    let dir = std::env::temp_dir();
+    let out = run_binary(&dir, &["--version"]);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "--version should exit 0; stderr={}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let expected = format!("fast-staged {}", env!("CARGO_PKG_VERSION"));
+    assert!(
+        stdout.trim() == expected,
+        "expected stdout `{expected}`, got `{}`",
+        stdout.trim()
+    );
+}
+
+#[test]
+fn help_flag() {
+    let dir = std::env::temp_dir();
+    let out = run_binary(&dir, &["--help"]);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "--help should exit 0; stderr={}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    for flag in ["--config", "--quiet", "--unstaged", "--allow-empty"] {
+        assert!(
+            stdout.contains(flag),
+            "help output missing `{flag}`; full stdout:\n{stdout}"
+        );
+    }
+}
+
+#[test]
+fn unknown_flag_rejected() {
+    let dir = std::env::temp_dir();
+    let out = run_binary(&dir, &["--quet"]);
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "unknown flag should exit 2 (clap convention); stdout={} stderr={}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("--quet")
+            || stderr.contains("unrecognized")
+            || stderr.contains("unexpected"),
+        "stderr should mention the bad flag; got:\n{stderr}"
+    );
+}
+
+#[test]
+fn config_explicit_loads() {
+    let dir = make_real_git_repo("e2e-cli-explicit-config");
+    // Stage a file matching the explicit config's pattern so the run reaches command exec.
+    stage_file(&dir, "a.txt", "hello\n");
+    // Write the config to a NON-default name + nested path so auto-discovery would NOT find it.
+    std::fs::create_dir_all(dir.join("nested")).unwrap();
+    write_config(
+        &dir,
+        "nested/custom.toml",
+        r#"
+            [group1.patterns]
+            "*.txt" = ["echo"]
+        "#,
+    );
+    let explicit = dir.join("nested").join("custom.toml");
+    let out = run_binary(
+        &dir,
+        &["--config", explicit.to_str().unwrap(), "--allow-empty"],
+    );
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "explicit --config should load and exit 0; stdout={} stderr={}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+#[test]
+fn config_missing_exits_nonzero() {
+    let dir = make_real_git_repo("e2e-cli-missing-config");
+    // Pass an absolute path that definitely does not exist.
+    let bogus = dir.join("does-not-exist").join("config.toml");
+    let out = run_binary(&dir, &["--config", bogus.to_str().unwrap()]);
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "missing --config path should exit 1 (AppError::ConfigNotFound); stdout={} stderr={}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("configuration file not found"),
+        "stderr should contain the AppError::ConfigNotFound display string; got:\n{stderr}"
+    );
+}
+
+#[test]
+fn quiet_flag_suppresses_output() {
+    let dir = make_real_git_repo("e2e-cli-quiet");
+    stage_file(&dir, "a.txt", "hello\n");
+    write_config(
+        &dir,
+        ".fast-staged.toml",
+        r#"
+            [group1.patterns]
+            "*.txt" = ["echo"]
+        "#,
+    );
+    let out = run_binary(&dir, &["--quiet"]);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "successful run with --quiet should exit 0; stdout={} stderr={}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.trim().is_empty(),
+        "--quiet should suppress success summary; stdout was:\n{stdout}"
+    );
+}
