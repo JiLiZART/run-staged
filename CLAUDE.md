@@ -216,24 +216,13 @@ A fast Rust replacement for lint-staged and nano-staged. Runs configured command
 ## Cross-Cutting Concerns
 <!-- GSD:architecture-end -->
 
-<!-- GSD:workflow-start source:GSD defaults -->
-## GSD Workflow Enforcement
+## Workflow: OpenSpec
 
-Before using Edit, Write, or other file-changing tools, start work through a GSD command so planning artifacts and execution context stay in sync.
+Planning lives in `openspec/` (spec-driven schema). `openspec/specs/` is the source of truth for current behavior; `openspec/changes/` holds pending work.
 
-Use these entry points:
-- `/gsd:quick` for small fixes, doc updates, and ad-hoc tasks
-- `/gsd:debug` for investigation and bug fixing
-- `/gsd:execute-phase` for planned phase work
+- `/opsx:explore` — think through an idea before committing to a change
+- `/opsx:propose` — create a change (proposal, delta specs, design, tasks)
+- `/opsx:apply` — implement a change's tasks
+- `/opsx:archive` — archive a finished change and merge its deltas into `openspec/specs/`
 
-Do not make direct repo edits outside a GSD workflow unless the user explicitly asks to bypass it.
-<!-- GSD:workflow-end -->
-
-
-
-<!-- GSD:profile-start -->
-## Developer Profile
-
-> Profile not yet configured. Run `/gsd:profile-user` to generate your developer profile.
-> This section is managed by `generate-claude-profile` -- do not edit manually.
-<!-- GSD:profile-end -->
+Run `openspec list` / `openspec list --specs` to see state, `openspec validate --all --strict` before archiving.

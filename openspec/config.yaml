@@ -1,0 +1,46 @@
+schema: spec-driven
+
+context: |
+  fast-staged: Rust replacement for lint-staged / nano-staged. Runs configured
+  commands on git-staged files with glob matching and parallel execution.
+  Core value: faster than lint-staged, zero Node.js runtime dependency.
+
+  Tech stack: Rust edition 2024 (stable), tokio, gix, clap (derive), serde +
+  toml + serde_json, globset, thiserror (typed AppError), ratatui (planned TUI).
+  Crate: crates/fast-staged (lib.rs orchestrator + main.rs binary).
+  CI: cargo fmt --check, cargo clippy -D warnings, cargo test.
+
+  Key decisions:
+  - gix for git reads; `git diff --cached` shell-out allowed for patch backup
+    and HEAD-vs-index staged listing
+  - TOML-first config; JSON and package.json["fast-staged"] also supported
+  - lint-staged compat is JSON/YAML only; JS function configs get a clear error
+  - Distribution: cargo install now; npm platform binaries (SWC pattern) in v2
+
+  Out of scope: JS function configs, watch/daemon mode, NAPI-RS bindings,
+  plugin system, network/auth.
+
+  Conventions: conventional commits; every behavior change ships with a test
+  (unit in-module or process-level in crates/fast-staged/tests/).
+
+# Per-artifact rules (optional)
+# Add custom rules for specific artifacts.
+# Example:
+#   rules:
+#     proposal:
+#       - Keep proposals under 500 words
+#       - Always include a "Non-goals" section
+#     tasks:
+#       - Break tasks into chunks of max 2 hours
+
+# Per-operation guidance (optional)
+# Add advisory guidance for how apply and archive work should be conducted.
+# This is separate from artifact rules above.
+# Example:
+#   operations:
+#     apply:
+#       guidance:
+#         - Keep test summaries concise
+#     archive:
+#       guidance:
+#         - Summarize the archive outcome before finishing

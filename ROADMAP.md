@@ -4,10 +4,10 @@ A CLI tool (inspired by nano-staged and lint-staged) to run commands for defined
 
 [ ] Deep config scan using current pwd, look at files (use node node_modules resolution algorithm) `.fast-staged.toml` or `fast-staged.toml` or read `fast-staged.json` or `.fast-staged.json`
 ```
-  timeout = "0sec"
+  timeout = "300ms"
   
   [group1]
-  timeout = "1sec"
+  timeout = "1s"
   patterns = { '*.rs' = ['cargo fmt'], "*.(js|ts|tsx|jsx)" = ['npm run fmt'] }
   
   [group2]
@@ -43,10 +43,10 @@ A CLI tool (inspired by nano-staged and lint-staged) to run commands for defined
 [ ] Add --unstaged to run commands for unstaged files too
 [ ] Add --quiet for running all tasks without TUI and return exit code if run fails
 [ ] Add support to backup staged files before tasks run as patch file in .git/fast-staged.diff and delete file after
-[ ] Add files chunking support, if in config set that not need to run program on each file need to create a chunk of files and pass files chunk on program run like `eslint file1.js file2.js` and for second chunk `eslint file3.js file4.js`
+[ ] Add files chunking support, if in config set that not need to run program on each file need to create a chunk of files and pass files chunk on program run like `eslint file1.js file2.js` and for second chunk `eslint file3.js file4.js`, ad config option for this
 [ ] Display running commands by groups when running for example
-[ ] Add ability to define mutable or readonly group (for readoly means that commands dont modify files)
- 
+[ ] Add ability to define mutable or readonly group (for readonly means that commands dont modify files)
+
 ```
   - group1
     (*.js, *.ts) - file1.js
