@@ -1,0 +1,17 @@
+---
+source: apps/run-staged/tests/seed_fixtures.rs
+expression: r.snapshot(&repo)
+---
+exit: Some(0)
+--- stdout
+⋯ Backing up original state…
+✔ Done backing up original state!
+⋯ Running tasks for staged files…
+✓ format/*.{js,ts}: fixture-tool --append "// formatted" (<duration>, 2 files)
+✔ Done running tasks for staged files!
+⋯ Staging changes from tasks…
+✔ Done staging changes from tasks!
+⋯ Cleaning up temporary files…
+✔ Done cleaning up temporary files!
+2 files, <duration>
+--- stderr

@@ -1,0 +1,2 @@
+[format]
+patterns = { "*.js" = ["fixture-tool --append \"// formatted\""] }

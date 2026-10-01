@@ -1,0 +1,15 @@
+[package]
+  description            = "Orchestrates config, git, matching, and execution for run-staged."
+  edition.workspace      = true
+  license.workspace      = true
+  name                   = "run-staged-core"
+  rust-version.workspace = true
+  version.workspace      = true
+
+[dependencies]
+  run-staged-config  = { workspace = true }
+  run-staged-exec    = { workspace = true }
+  run-staged-git     = { workspace = true }
+  run-staged-matcher = { workspace = true }
+  thiserror          = { workspace = true }
+  tokio              = { workspace = true }

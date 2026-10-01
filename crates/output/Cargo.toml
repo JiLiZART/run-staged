@@ -1,0 +1,10 @@
+[package]
+  description            = "Plain-text result formatting for run-staged."
+  edition.workspace      = true
+  license.workspace      = true
+  name                   = "run-staged-output"
+  rust-version.workspace = true
+  version.workspace      = true
+
+[dependencies]
+  run-staged-exec = { workspace = true }

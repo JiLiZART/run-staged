@@ -1,0 +1,3 @@
+[rust]
+per_file = true
+patterns = { "*.rs" = ["fixture-tool"] }

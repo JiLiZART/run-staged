@@ -86,7 +86,7 @@
 timeout = "1sec"
 
 [group1.patterns]
-"*.(js|ts|tsx|jsx)" = [
+"*.{js,ts,tsx,jsx}" = [
     "npm run fmt"
 ]
 
@@ -323,21 +323,21 @@ timeout = "5sec"
 
 ---
 
-## [*] Add config variations, read .fast-staged.toml, or fast-staged.toml or read fast-staged.json or .fast-staged.json or read "fast-staged" section in package.json
+## [*] Add config variations, read .run-staged.toml, or run-staged.toml or read run-staged.json or .run-staged.json or read "run-staged" section in package.json
 
 **План реализации:**
 
 1. Создать функцию `find_config_file()` которая:
   - Проверяет наличие файлов в следующем порядке приоритета:
-    1. `.fast-staged.toml` (в текущей директории)
-    2. `fast-staged.toml` (в текущей директории)
-    3. `.fast-staged.json` (в текущей директории)
-    4. `fast-staged.json` (в текущей директории)
-    5. `package.json` (искать секцию "fast-staged")
+    1. `.run-staged.toml` (в текущей директории)
+    2. `run-staged.toml` (в текущей директории)
+    3. `.run-staged.json` (в текущей директории)
+    4. `run-staged.json` (в текущей директории)
+    5. `package.json` (искать секцию "run-staged")
   - Возвращает путь к найденному файлу и его тип (toml/json/package.json)
 2. Создать функцию `load_config_from_package_json()`:
   - Парсить `package.json` используя `serde_json`
-  - Извлекать секцию `"fast-staged"` из объекта
+  - Извлекать секцию `"run-staged"` из объекта
   - Преобразовывать JSON в структуру `Config` (может потребоваться конвертация)
 3. Модифицировать `load_config()`:
   - Вызывать `find_config_file()` для поиска конфига
@@ -368,14 +368,14 @@ timeout = "5sec"
 **Примеры конфигов:**
 
 ```toml
-# .fast-staged.toml или fast-staged.toml
+# .run-staged.toml или run-staged.toml
 timeout = "1sec"
 [group1.patterns]
 "*.rs" = ["cargo fmt"]
 ```
 
 ```json
-// .fast-staged.json или fast-staged.json
+// .run-staged.json или run-staged.json
 {
   "timeout": "1sec",
   "group1": {
@@ -390,7 +390,7 @@ timeout = "1sec"
 // package.json
 {
   "name": "my-project",
-  "fast-staged": {
+  "run-staged": {
     "timeout": "1sec",
     "group1": {
       "patterns": {
@@ -508,7 +508,7 @@ timeout = "1sec"
 
 - Добавить цветной вывод ошибок (красный для ошибок)
 - Предлагать решения для типичных проблем:
-  - "No config found" → "Create .fast-staged.toml file"
+  - "No config found" → "Create .run-staged.toml file"
   - "No staged files" → "Run 'git add' to stage files"
   - "Command not found" → "Install the required tool or check PATH"
 
@@ -643,7 +643,7 @@ timeout = "1sec"
 
 **Изменения в коде:**
 
-- Зависимость `clap` в `Cargo.toml` (crates/fast-staged).
+- Зависимость `clap` в `Cargo.toml` (crates/run-staged).
 - Структура/парсер аргументов, передача опций в `run()` (или в конструктор `App`).
 - Расширение `Config::load()` / добавление `load_from(path)` для загрузки конфига по указанному пути.
 - Правки `get_changed_files()`: принять опции (unstaged, allow_empty); режим unstaged — diff working tree vs index через gix; при allow_empty и пустом списке возвращать `Ok(vec![])`.
@@ -651,11 +651,11 @@ timeout = "1sec"
 
 ---
 
-## [*] Add support to backup staged files before tasks run as patch file in .git/fast-staged.patch and delete file after
+## [*] Add support to backup staged files before tasks run as patch file in .git/run-staged.patch and delete file after
 
 **План реализации:**
 
-1. Перед вызовом `execute_commands()` создавать бэкап: записать в `.git/fast-staged.patch` вывод `git diff --cached` (или аналог через gix: diff index vs HEAD).
-2. Путь к patch: `repo.git_dir().join("fast-staged.patch")` (или `.git/fast-staged.patch` от корня репо).
+1. Перед вызовом `execute_commands()` создавать бэкап: записать в `.git/run-staged.patch` вывод `git diff --cached` (или аналог через gix: diff index vs HEAD).
+2. Путь к patch: `repo.git_dir().join("run-staged.patch")` (или `.git/run-staged.patch` от корня репо).
 3. После завершения всех задач (успех или ошибка) удалять этот файл — вызов в конце `App::run()` после `execute_commands()` и основного цикла (и в ветке quiet при выходе).
 4. Не восстанавливать рабочую копию из patch в этой задаче (восстановление при ошибке — отдельный пункт ROADMAP про stash).

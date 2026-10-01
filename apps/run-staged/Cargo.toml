@@ -1,0 +1,22 @@
+[package]
+  description            = "Run commands on git-staged files. A fast Rust replacement for lint-staged."
+  edition.workspace      = true
+  license.workspace      = true
+  name                   = "run-staged"
+  rust-version.workspace = true
+  version.workspace      = true
+
+[[bin]]
+  name = "run-staged"
+  path = "src/main.rs"
+
+[dependencies]
+  clap              = { workspace = true }
+  run-staged-core   = { workspace = true }
+  run-staged-output = { workspace = true }
+  tokio             = { workspace = true }
+
+[dev-dependencies]
+  insta              = "1"
+  run-staged-testkit = { path = "../../crates/testkit" }
+  tempfile           = "3.20"

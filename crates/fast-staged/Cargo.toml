@@ -2,6 +2,7 @@
 description = "A fast Rust replacement for lint-staged. Run configured commands on staged files."
 edition     = "2024"
 name        = "fast-staged"
+publish     = false # Frozen MVP reference; superseded by apps/run-staged.
 version     = "0.1.0"
 
 [[bin]]

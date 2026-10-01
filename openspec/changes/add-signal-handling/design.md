@@ -19,7 +19,7 @@
 - **Exit code 130** on interrupt (128 + SIGINT), matching shell convention and what git hooks expect for "aborted by user". Introduce via `AppError::Cancelled` mapped to 130 in `main.rs`.
 - **Restore before exit**: interrupt follows the existing failure path (restore → cleanup, keep patch if restore fails).
 - **Second signal** sets a "force" flag so `terminate()` skips the grace period.
-- **Hints live in `AppError` Display text** (`<message>\nhint: <hint>`), keeping `main.rs` output as `error: {e}`.
+- **Hints live in `AppError` Display text** (`<message>\nhint: <hint>`), keeping `apps/run-staged/src/main.rs` output as `error: {e}`.
 
 ## Risks / Trade-offs
 

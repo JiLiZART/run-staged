@@ -1,0 +1,12 @@
+[package]
+  description            = "Glob matching of staged paths to run-staged groups and patterns."
+  edition.workspace      = true
+  license.workspace      = true
+  name                   = "run-staged-matcher"
+  rust-version.workspace = true
+  version.workspace      = true
+
+[dependencies]
+  globset           = { workspace = true }
+  run-staged-config = { workspace = true }
+  thiserror         = { workspace = true }

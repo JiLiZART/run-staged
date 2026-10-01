@@ -1,0 +1,2 @@
+[root]
+patterns = { "*" = ["fixture-tool --stdout root-config"] }

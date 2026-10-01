@@ -1,0 +1,7 @@
+---
+source: apps/run-staged/tests/seed_fixtures.rs
+expression: r.snapshot(&repo)
+---
+exit: Some(0)
+--- stdout
+--- stderr

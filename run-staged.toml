@@ -2,7 +2,7 @@ timeout = "0sec"
 
 [group1]
 timeout = "1sec"
-patterns = { '*.rs' = ['cargo fmt'], "*.(js|ts|tsx|jsx)" = ['npm run fmt'] }
+patterns = { '*.rs' = ['cargo fmt'], "*.{js,ts,tsx,jsx}" = ['npm run fmt'] }
 
 [group2]
 timeout = "5s"

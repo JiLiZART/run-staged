@@ -1,0 +1,21 @@
+---
+source: apps/run-staged/tests/output_reporting.rs
+expression: r.snapshot(&repo)
+---
+exit: Some(1)
+--- stdout
+⋯ Backing up original state…
+✔ Done backing up original state!
+⋯ Running tasks for staged files…
+✗ Failed running tasks for staged files
+⋯ Cleaning up temporary files…
+✔ Done cleaning up temporary files!
+2 files, <duration>
+--- stderr
+┌────────────────────────────────────────────────────────────┐
+│ FAILED: fixture-tool --stderr boom --exit 1
+│ Exit code: 1
+├────────────────────────────────────────────────────────────┤
+│ boom
+└────────────────────────────────────────────────────────────┘
+error: command `fixture-tool --stderr boom --exit 1` failed with exit code 1

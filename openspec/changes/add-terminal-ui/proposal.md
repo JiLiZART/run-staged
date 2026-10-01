@@ -18,6 +18,6 @@ Output is only printed after every command finishes, so a slow pre-commit run lo
 
 ## Impact
 
-- Code: new `ui` module; executor emits progress events; `lib.rs` chooses TUI vs plain output.
+- Code: new `crates/tui` crate (package `run-staged-tui`); it builds on the `StepEvent` callback of `run_staged_core::run`, and `crates/exec` adds per-command progress events. `apps/run-staged` chooses TUI or plain output.
 - Dependencies: `ratatui` (already declared) with its crossterm backend.
 - Depends on `add-signal-handling` for the cancellation path; raw mode must translate Ctrl+C key events into the same cancellation.

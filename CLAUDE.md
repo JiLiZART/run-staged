@@ -1,7 +1,7 @@
 <!-- GSD:project-start source:PROJECT.md -->
 ## Project
 
-**fast-staged**
+**run-staged**
 
 A fast Rust replacement for lint-staged and nano-staged. Runs configured commands on git-staged files with parallel execution, glob pattern matching, and a live terminal UI. Distributed as both a Cargo binary crate and platform-specific npm packages (like SWC).
 
@@ -22,7 +22,7 @@ A fast Rust replacement for lint-staged and nano-staged. Runs configured command
 ## Technology Stack
 
 ## Languages
-- Rust (edition 2024) - All application logic in `crates/fast-staged/src/`
+- Rust (edition 2024) - Library crates in `crates/{config,git,matcher,exec,output,core}/src/`, binary in `apps/run-staged/src/`; `crates/fast-staged/` is the frozen MVP reference
 - None currently present in source; `.prettierignore` references JS artifacts (wasi), suggesting future WASM/JS output may be planned
 ## Runtime
 - Native binary (compiled Rust)
@@ -31,14 +31,14 @@ A fast Rust replacement for lint-staged and nano-staged. Runs configured command
 - Lockfile: `Cargo.lock` — NOT present yet (project is in skeleton state)
 - Yarn 4.13.0 also present (`.yarn/releases/yarn-4.13.0.cjs`, `.yarnrc.yml`) — used for dev tooling (husky, lint-staged) not for the Rust binary itself
 ## Frameworks
-- None declared yet — `crates/fast-staged/Cargo.toml` has an empty `[dependencies]` section
+- Shared versions in root `[workspace.dependencies]`; each crate declares only what it uses
 - `tokio` (async runtime, `features = ["full"]`) — async command execution, signal handling
 - `ratatui` — terminal UI rendering
 - `gix` — git operations (staged file listing, stash, diff)
 - `clap` — CLI argument parsing (`--config`, `--quiet`, `--unstaged`, `--allow-empty`)
 - `thiserror` — typed error enum (`AppError`)
 - `toml` — TOML config parsing
-- `serde_json` — JSON config parsing (`fast-staged.json`, `package.json` section)
+- `serde_json` — JSON config parsing (`run-staged.json`, `package.json` section)
 - `parse_duration` — human-readable timeout parsing (e.g., `"1sec"`, `"5s"`)
 - Taplo — TOML formatter, config at `.taplo.toml`
 - Prettier — JS/general formatter, ignore rules at `.prettierignore`
@@ -146,14 +146,14 @@ A fast Rust replacement for lint-staged and nano-staged. Runs configured command
 ## Architecture
 
 ## Pattern Overview
-- Rust Cargo workspace with a single `fast-staged` crate currently (`crates/fast-staged`)
-- The binary is a stub (`main.rs` prints "Hello, world!") — implementation is not yet written
+- Rust Cargo workspace: small library crates in `crates/` (packages `run-staged-<name>`) plus the `apps/run-staged` binary; `crates/fast-staged` is the frozen MVP
+- The binary (`apps/run-staged`) parses args and calls `run_staged_core::run`; git access is gix-only and lock-safe (no `git` process)
 - Intended design is documented in `TODO.md` and `ROADMAP.md`: a pipeline of config loading → git file discovery → command matching → parallel/sequential execution → TUI rendering
 - CI pipeline targets NAPI-RS native Node.js bindings (`.node` / `.wasm` artifacts), suggesting the final distribution will be a Node.js-consumable native module in addition to (or instead of) a standalone binary
 ## Intended Layers (from TODO.md / ROADMAP.md)
 - Purpose: Discover and parse configuration from multiple file formats
 - Planned functions: `Config::find_file()`, `Config::load()`, `Config::load_from_package_json()`
-- Config sources searched in priority order: `.fast-staged.toml`, `fast-staged.toml`, `.fast-staged.json`, `fast-staged.json`, `package.json["fast-staged"]`
+- Config sources searched in priority order: `.run-staged.toml`, `run-staged.toml`, `.run-staged.json`, `run-staged.json`, `package.json["run-staged"]`
 - Planned enum `RunConfig { config: Option<PathBuf>, quiet: bool, unstaged: bool, stash: bool, allow_empty: bool, fail_on_changes: bool, revert: bool }`
 - Planned enum: `ConfigSource { TomlFile(PathBuf), JsonFile(PathBuf), PackageJson(PathBuf) }`
 - Planned struct: `Config` with `groups: Vec<Group>`, global `timeout: Option<Duration>`, `execution_order: Option<ExecutionOrder>`, `continue_on_error: bool` 
@@ -162,7 +162,7 @@ A fast Rust replacement for lint-staged and nano-staged. Runs configured command
 - Planned function: `GitContext::get_changed_files(options)`
 - Uses `gix` crate for git operations
 - Returns `Err(AppError::NotGitRepository)` if not in a git repo, `Err(AppError::NoStagedFiles)` if nothing staged
-- Planned backup support: writes `.git/fast-staged.patch` before execution, deletes after
+- Backup: copies the index to `<git-dir>/run-staged.index` before execution; restored under `<index>.lock` on failure, deleted after
 - Purpose: Map staged files to commands defined in config groups
 - Planned function: `Commands::match_from_files()` → returns list of `FileCommand` structs
 - Iterates groups, matches files against glob patterns, collects unique file count
@@ -191,22 +191,21 @@ A fast Rust replacement for lint-staged and nano-staged. Runs configured command
 - UI reads `StateModel` on each frame without blocking execution
 ## Key Abstractions
 - Purpose: Represents parsed user configuration including groups and patterns
-- Planned file: `crates/fast-staged/src/config.rs` (not yet created)
+- File: `crates/config/src/`
 - Pattern: Deserialized from TOML/JSON via `serde`
 - Purpose: A named set of file patterns with associated commands and execution settings
-- Planned file: `crates/fast-staged/src/config.rs`
+- File: `crates/config/src/types.rs`
 - Pattern: Contains `HashMap<FilePattern, CommandList>` plus execution knobs
 - Purpose: Live tracking of a single command execution (one per file+command pair)
-- Planned file: `crates/fast-staged/src/commands.rs` (not yet created)
+- File: `crates/exec/src/lib.rs`
 - Pattern: Shared state via `Arc<Mutex<T>>` between async executor and UI thread
 - Purpose: Typed, user-readable error enum covering all failure modes
-- Planned file: `crates/cli/src/error.rs` (not yet created)
+- File: each crate has its own `error.rs`; `crates/core/src/lib.rs` wraps them in `AppError`
 - Pattern: `thiserror::Error` derive with contextual messages
 ## Entry Points
-- Location: `crates/fast-staged/src/main.rs`
-- Current state: Stub — only prints "Hello, world!"
+- Location: `apps/run-staged/src/main.rs`
 - Planned responsibilities: Parse CLI args, call `run()`, handle top-level errors with colored output
-- Location: `crates/fast-staged/src/lib.rs` (not yet created)
+- Location: `crates/core/src/lib.rs`
 - Triggers: Called from `main()`
 - Responsibilities: Orchestrates config → git → match → execute → UI pipeline via `pub async fn run()`
 ## Error Handling

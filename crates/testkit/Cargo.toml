@@ -1,0 +1,17 @@
+[package]
+  description            = "Fixture-based end-to-end test harness for run-staged."
+  edition.workspace      = true
+  license.workspace      = true
+  name                   = "run-staged-testkit"
+  publish                = false
+  rust-version.workspace = true
+  version.workspace      = true
+
+[[bin]]
+  name = "fixture-tool"
+  path = "src/bin/fixture-tool.rs"
+
+[dependencies]
+  regex      = "1"
+  serde_json = { workspace = true }
+  tempfile   = "3.20"

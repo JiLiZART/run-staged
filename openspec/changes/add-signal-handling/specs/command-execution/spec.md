@@ -5,7 +5,7 @@ On SIGINT or SIGTERM (Unix) or Ctrl+C / Ctrl+Break (Windows), the tool SHALL sto
 
 #### Scenario: Ctrl+C while a command runs
 - **WHEN** a command is running and the user presses Ctrl+C
-- **THEN** the command's process is terminated, the index matches its pre-run state, `.git/fast-staged.patch` is removed, and the tool exits with code 130
+- **THEN** the command's process is terminated, the index matches its pre-run state, the index backup is removed, and the tool exits with code 130
 
 #### Scenario: Ctrl+C before later groups start
 - **WHEN** the user presses Ctrl+C while group `a` runs and group `b` has not started

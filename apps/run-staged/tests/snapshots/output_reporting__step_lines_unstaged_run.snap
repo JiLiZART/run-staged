@@ -1,0 +1,11 @@
+---
+source: apps/run-staged/tests/output_reporting.rs
+expression: r.snapshot(&repo)
+---
+exit: Some(0)
+--- stdout
+⋯ Running tasks for unstaged files…
+✓ default/*.rs: fixture-tool (<duration>, 1 file)
+✔ Done running tasks for unstaged files!
+1 file, <duration>
+--- stderr

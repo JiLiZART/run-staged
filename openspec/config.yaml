@@ -1,27 +1,32 @@
 schema: spec-driven
 
 context: |
-  fast-staged: Rust replacement for lint-staged / nano-staged. Runs configured
-  commands on git-staged files with glob matching and parallel execution.
+  run-staged (formerly fast-staged; renamed because the name was taken on npm):
+  Rust replacement for lint-staged / nano-staged. Runs configured commands on
+  git-staged files with glob matching and parallel execution.
   Core value: faster than lint-staged, zero Node.js runtime dependency.
 
   Tech stack: Rust edition 2024 (stable), tokio, gix, clap (derive), serde +
-  toml + serde_json, globset, thiserror (typed AppError), ratatui (planned TUI).
-  Crate: crates/fast-staged (lib.rs orchestrator + main.rs binary).
+  toml + serde_json, globset, thiserror, ratatui (planned TUI).
+  Layout: small library crates in crates/<short-name> (config, git, matcher,
+  exec, output, core, testkit; packages named run-staged-<name>) and the
+  binary in apps/run-staged. crates/fast-staged is the frozen MVP reference.
   CI: cargo fmt --check, cargo clippy -D warnings, cargo test.
 
   Key decisions:
-  - gix for git reads; `git diff --cached` shell-out allowed for patch backup
-    and HEAD-vs-index staged listing
-  - TOML-first config; JSON and package.json["fast-staged"] also supported
+  - All git access goes through gix; never shell out to the git binary. The tool
+    must keep working while git holds .git/index.lock: reads take no lock,
+    writes use <index>.lock with bounded wait, GIT_INDEX_FILE is honored
+  - TOML-first config; JSON and package.json["run-staged"] also supported
   - lint-staged compat is JSON/YAML only; JS function configs get a clear error
-  - Distribution: cargo install now; npm platform binaries (SWC pattern) in v2
+  - Distribution: cargo install run-staged; npm @run-staged/cli + platform
+    packages @run-staged/<platform> (SWC pattern, thin JS launcher)
 
   Out of scope: JS function configs, watch/daemon mode, NAPI-RS bindings,
   plugin system, network/auth.
 
   Conventions: conventional commits; every behavior change ships with a test
-  (unit in-module or process-level in crates/fast-staged/tests/).
+  (unit in-module or fixture-based process-level in apps/run-staged/tests/).
 
 # Per-artifact rules (optional)
 # Add custom rules for specific artifacts.

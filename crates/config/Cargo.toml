@@ -1,0 +1,14 @@
+[package]
+  description  = "Config discovery, parsing, and resolved group settings for run-staged."
+  edition.workspace      = true
+  license.workspace      = true
+  name                   = "run-staged-config"
+  rust-version.workspace = true
+  version.workspace      = true
+
+[dependencies]
+  parse_duration = { workspace = true }
+  serde          = { workspace = true }
+  serde_json     = { workspace = true }
+  thiserror      = { workspace = true }
+  toml           = { workspace = true }

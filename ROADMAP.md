@@ -2,13 +2,13 @@
 
 A CLI tool (inspired by nano-staged and lint-staged) to run commands for defined set of patterns in config for git staged files befor git push
 
-[ ] Deep config scan using current pwd, look at files (use node node_modules resolution algorithm) `.fast-staged.toml` or `fast-staged.toml` or read `fast-staged.json` or `.fast-staged.json`
+[ ] Deep config scan using current pwd, look at files (use node node_modules resolution algorithm) `.run-staged.toml` or `run-staged.toml` or read `run-staged.json` or `.run-staged.json`
 ```
   timeout = "300ms"
   
   [group1]
   timeout = "1s"
-  patterns = { '*.rs' = ['cargo fmt'], "*.(js|ts|tsx|jsx)" = ['npm run fmt'] }
+  patterns = { '*.rs' = ['cargo fmt'], "*.{js,ts,tsx,jsx}" = ['npm run fmt'] }
   
   [group2]
   timeout = "5s"
@@ -36,13 +36,13 @@ A CLI tool (inspired by nano-staged and lint-staged) to run commands for defined
 [ ] Display total time of execution
 [ ] Display total time of execution per command
 [ ] Add ability to define relative or absolute file paths will be passed to command for each group
-[ ] Add config variations, read .fast-staged.toml, or fast-staged.toml or read fast-staged.json or .fast-staged.json
+[ ] Add config variations, read .run-staged.toml, or run-staged.toml or read run-staged.json or .run-staged.json
 [ ] Add checks and readable errors (create errors enum) for `no config`, `config is not valid`, `no git repository`, `no staged files found` , `no files found matched for group_name patterns`, `failed to execute command, no command found`,
 [ ] Catch process signals or keyboard interrupts and gracefully exit
 [ ] Add run options --config path/to/config.toml
 [ ] Add --unstaged to run commands for unstaged files too
 [ ] Add --quiet for running all tasks without TUI and return exit code if run fails
-[ ] Add support to backup staged files before tasks run as patch file in .git/fast-staged.diff and delete file after
+[ ] Add support to backup staged files before tasks run as patch file in .git/run-staged.diff and delete file after
 [ ] Add files chunking support, if in config set that not need to run program on each file need to create a chunk of files and pass files chunk on program run like `eslint file1.js file2.js` and for second chunk `eslint file3.js file4.js`, ad config option for this
 [ ] Display running commands by groups when running for example
 [ ] Add ability to define mutable or readonly group (for readonly means that commands dont modify files)
@@ -71,3 +71,19 @@ A CLI tool (inspired by nano-staged and lint-staged) to run commands for defined
 ```
 
 [ ] Add cli --install comand to define git hook itself without using `husky` or whatever
+[ ] Display rich log of whats going on when running tasks, like lint-staged do or do it in better way
+```
+⋯ Backing up original state…
+✔ Done backing up original state (1f4c047d)!
+⋯ Running tasks for staged files…
+    *.{json,md} — 1 file
+      ⋯ prettier --write
+
+✔ prettier --write
+
+✔ Done running tasks for staged files!
+⋯ Staging changes from tasks…
+✔ Done staging changes from tasks!
+⋯ Cleaning up temporary files…
+✔ Done cleaning up temporary files!
+```

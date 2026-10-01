@@ -1,0 +1,15 @@
+[package]
+  description            = "Lock-safe git index access (gix only) for run-staged."
+  edition.workspace      = true
+  license.workspace      = true
+  name                   = "run-staged-git"
+  rust-version.workspace = true
+  version.workspace      = true
+
+[dependencies]
+  gix       = { workspace = true }
+  thiserror = { workspace = true }
+
+[dev-dependencies]
+  run-staged-testkit = { path = "../testkit" }
+  tempfile           = "3.20"
