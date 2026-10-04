@@ -8,3 +8,4 @@
 
 [dependencies]
   run-staged-exec = { workspace = true }
+  unicode-width   = { workspace = true }

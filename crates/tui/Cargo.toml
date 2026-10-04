@@ -1,0 +1,15 @@
+[package]
+  description            = "Live animated terminal panel for run-staged."
+  edition.workspace      = true
+  license.workspace      = true
+  name                   = "run-staged-tui"
+  rust-version.workspace = true
+  version.workspace      = true
+
+[dependencies]
+  ratatui           = { workspace = true }
+  run-staged-exec   = { workspace = true }
+  run-staged-output = { workspace = true }
+
+[dev-dependencies]
+  insta = "1"

@@ -13,3 +13,7 @@
   run-staged-matcher = { workspace = true }
   thiserror          = { workspace = true }
   tokio              = { workspace = true }
+
+[dev-dependencies]
+  run-staged-testkit = { path = "../testkit" }
+  shlex              = { workspace = true }

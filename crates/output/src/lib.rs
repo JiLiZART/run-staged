@@ -1,6 +1,8 @@
 //! Plain-text rendering of run results. Every function returns `String`s; the
 //! binary decides where they go, so the future TUI can reuse the same text.
 
+pub mod ansi;
+
 use std::time::Duration;
 
 use run_staged_exec::CommandOutcome;
@@ -20,34 +22,127 @@ pub fn format_success_line(
     )
 }
 
-/// The bordered failure box for one failed or timed-out invocation.
-pub fn format_error_box(command: &str, exit_code: i32, stdout: &[u8], stderr: &[u8]) -> String {
-    let width = 60;
-    let border = "─".repeat(width);
+/// How a failure box is drawn.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct BoxStyle {
+    /// Color the border and keep the command's own colors (stderr is a terminal).
+    pub colored: bool,
+    /// The invocation timed out: yellow instead of red.
+    pub timed_out: bool,
+    /// Total box width in columns, borders included (the terminal width).
+    /// Clamped to at least [`MIN_BOX_WIDTH`].
+    pub width: usize,
+}
+
+/// Box width when the terminal width is unknown.
+pub const DEFAULT_BOX_WIDTH: usize = 80;
+/// Narrowest box drawn, whatever the terminal says.
+pub const MIN_BOX_WIDTH: usize = 20;
+
+const RED: &str = "\x1b[31m";
+const YELLOW: &str = "\x1b[33m";
+const RESET: &str = "\x1b[0m";
+
+/// The full-width bordered failure box for one failed or timed-out invocation.
+///
+/// Every row is `│ text │`, padded to `style.width`; long lines wrap. Captured
+/// output always loses cursor moves, clears, and other control sequences. With
+/// `style.colored` the border and `FAILED:` line are red (yellow for timeouts),
+/// command colors are kept, and every row's text ends with a reset; otherwise
+/// all escape sequences are removed.
+pub fn format_error_box(
+    command: &str,
+    exit_code: i32,
+    stdout: &[u8],
+    stderr: &[u8],
+    style: BoxStyle,
+) -> String {
+    let (paint, reset) = match (style.colored, style.timed_out) {
+        (false, _) => ("", ""),
+        (true, false) => (RED, RESET),
+        (true, true) => (YELLOW, RESET),
+    };
+    let sgr = if style.colored {
+        ansi::Sgr::Keep
+    } else {
+        ansi::Sgr::Strip
+    };
+    let width = style.width.max(MIN_BOX_WIDTH);
+    let border = "─".repeat(width - 2);
+    let edge = format!("{paint}│{reset}");
+    // `prefix` is an SGR to open the text with (the header's paint).
+    let rows = |prefix: &str, line: &str| {
+        let clean = ansi::sanitize(&line.replace('\t', "    "), sgr);
+        let mut s = String::new();
+        for (text, cols) in wrap(&format!("{prefix}{clean}"), width - 4) {
+            let pad = " ".repeat(width - 4 - cols);
+            let end = if style.colored { RESET } else { "" };
+            s.push_str(&format!("{edge} {text}{end}{pad} {edge}\n"));
+        }
+        s
+    };
+    let content = |line: &str| rows("", line);
+
     let mut out = String::new();
-    out.push_str(&format!("┌{border}┐\n"));
-    out.push_str(&format!("│ FAILED: {command}\n"));
-    out.push_str(&format!("│ Exit code: {exit_code}\n"));
+    out.push_str(&format!("{paint}┌{border}┐{reset}\n"));
+    out.push_str(&rows(paint, &format!("FAILED: {command}")));
+    out.push_str(&content(&format!("Exit code: {exit_code}")));
 
     let stderr_str = String::from_utf8_lossy(stderr);
     if !stderr_str.trim().is_empty() {
-        out.push_str(&format!("├{border}┤\n"));
+        out.push_str(&format!("{paint}├{border}┤{reset}\n"));
         for line in stderr_str.lines().take(40) {
-            out.push_str(&format!("│ {line}\n"));
+            out.push_str(&content(line));
         }
     }
 
     let stdout_str = String::from_utf8_lossy(stdout);
     if !stdout_str.trim().is_empty() {
-        out.push_str(&format!("├{border}┤\n"));
-        out.push_str("│ stdout:\n");
+        out.push_str(&format!("{paint}├{border}┤{reset}\n"));
+        out.push_str(&content("stdout:"));
         for line in stdout_str.lines().take(20) {
-            out.push_str(&format!("│ {line}\n"));
+            out.push_str(&content(line));
         }
     }
 
-    out.push_str(&format!("└{border}┘"));
+    out.push_str(&format!("{paint}└{border}┘{reset}"));
     out
+}
+
+/// Splits `line` into rows of at most `width` columns, each with its column
+/// count. SGR sequences take no room; a row cut mid-color reopens that color.
+fn wrap(line: &str, width: usize) -> Vec<(String, usize)> {
+    let mut rows = Vec::new();
+    let (mut row, mut cols, mut active) = (String::new(), 0, String::new());
+    let mut chars = line.chars();
+    while let Some(c) = chars.next() {
+        if c == '\x1b' {
+            // `sanitize` leaves only complete SGR sequences: ESC [ … m.
+            let mut seq = String::from(c);
+            for c in chars.by_ref() {
+                seq.push(c);
+                if c == 'm' {
+                    break;
+                }
+            }
+            if seq == "\x1b[0m" || seq == "\x1b[m" {
+                active.clear();
+            } else {
+                active.push_str(&seq);
+            }
+            row.push_str(&seq);
+            continue;
+        }
+        let w = unicode_width::UnicodeWidthChar::width(c).unwrap_or(0);
+        if cols + w > width && cols > 0 {
+            rows.push((std::mem::replace(&mut row, active.clone()), cols));
+            cols = 0;
+        }
+        row.push(c);
+        cols += w;
+    }
+    rows.push((row, cols));
+    rows
 }
 
 /// `"✗ {group}/{pattern}: {cmd} (cancelled by sibling failure)"`.
@@ -66,8 +161,14 @@ pub struct Rendered {
     pub failures: usize,
 }
 
-/// Render all outcomes. Success lines are dropped when `quiet`; failures never are.
-pub fn render_results(outcomes: &[CommandOutcome], quiet: bool) -> Rendered {
+/// Render all outcomes. Success lines are dropped when `quiet`; failures never
+/// are. `colored` and `width` shape the failure boxes (see [`format_error_box`]).
+pub fn render_results(
+    outcomes: &[CommandOutcome],
+    quiet: bool,
+    colored: bool,
+    width: usize,
+) -> Rendered {
     let mut r = Rendered::default();
     for outcome in outcomes {
         match outcome {
@@ -94,11 +195,17 @@ pub fn render_results(outcomes: &[CommandOutcome], quiet: bool) -> Rendered {
                 exit_code,
                 stdout,
                 stderr,
+                timed_out,
                 ..
             } => {
                 r.failures += 1;
+                let style = BoxStyle {
+                    colored,
+                    timed_out: *timed_out,
+                    width,
+                };
                 r.stderr
-                    .push(format_error_box(command, *exit_code, stdout, stderr));
+                    .push(format_error_box(command, *exit_code, stdout, stderr, style));
             }
             CommandOutcome::Cancelled {
                 group,
@@ -194,6 +301,7 @@ mod tests {
             exit_code: 1,
             stdout: Vec::new(),
             stderr: b"err".to_vec(),
+            timed_out: false,
         }
     }
 
@@ -225,7 +333,7 @@ mod tests {
 
     #[test]
     fn error_box_includes_command_and_exit_code() {
-        let out = format_error_box("eslint", 1, b"", b"oops");
+        let out = format_error_box("eslint", 1, b"", b"oops", BoxStyle::default());
         assert!(out.contains("FAILED: eslint"), "{out}");
         assert!(out.contains("Exit code: 1"), "{out}");
         assert!(out.contains("oops"), "{out}");
@@ -233,7 +341,7 @@ mod tests {
 
     #[test]
     fn error_box_handles_empty_output() {
-        let out = format_error_box("foo", 2, b"", b"");
+        let out = format_error_box("foo", 2, b"", b"", BoxStyle::default());
         assert!(out.contains("Exit code: 2"));
         assert!(out.starts_with('┌'));
         assert!(out.ends_with('┘'));
@@ -245,7 +353,13 @@ mod tests {
 
     #[test]
     fn error_box_includes_stdout_when_nonempty() {
-        let out = format_error_box("rustc", 101, b"compiling foo\nlinking", b"E0001");
+        let out = format_error_box(
+            "rustc",
+            101,
+            b"compiling foo\nlinking",
+            b"E0001",
+            BoxStyle::default(),
+        );
         assert!(out.contains("stdout:"));
         assert!(out.contains("compiling foo"));
         assert!(out.contains("E0001"));
@@ -253,7 +367,7 @@ mod tests {
 
     #[test]
     fn error_box_skips_stdout_when_empty() {
-        let out = format_error_box("foo", 1, b"", b"some stderr");
+        let out = format_error_box("foo", 1, b"", b"some stderr", BoxStyle::default());
         assert!(!out.contains("stdout:"));
     }
 
@@ -261,19 +375,25 @@ mod tests {
     fn error_box_truncates_long_streams() {
         let stderr: String = (0..50).map(|i| format!("e{i}\n")).collect();
         let stdout: String = (0..30).map(|i| format!("o{i}\n")).collect();
-        let out = format_error_box("x", 1, stdout.as_bytes(), stderr.as_bytes());
-        assert!(out.contains("│ e39\n") && !out.contains("│ e40\n"));
-        assert!(out.contains("│ o19\n") && !out.contains("│ o20\n"));
+        let out = format_error_box(
+            "x",
+            1,
+            stdout.as_bytes(),
+            stderr.as_bytes(),
+            BoxStyle::default(),
+        );
+        assert!(out.contains("│ e39 ") && !out.contains("│ e40 "));
+        assert!(out.contains("│ o19 ") && !out.contains("│ o20 "));
     }
 
     #[test]
     fn render_collects_failures_and_passes() {
         let outcomes = vec![success(1), success(2), failure()];
-        let loud = render_results(&outcomes, false);
+        let loud = render_results(&outcomes, false, false, 80);
         assert_eq!(loud.failures, 1);
         assert_eq!(loud.stdout.len(), 2);
         assert_eq!(loud.stderr.len(), 1);
-        let quiet = render_results(&outcomes, true);
+        let quiet = render_results(&outcomes, true, false, 80);
         assert_eq!(quiet.failures, 1);
         assert!(quiet.stdout.is_empty(), "quiet drops success lines");
         assert_eq!(quiet.stderr, loud.stderr, "quiet keeps failure boxes");
@@ -312,11 +432,127 @@ mod tests {
             pattern: "*.rs".into(),
             command: "skipped".into(),
         }];
-        let r = render_results(&outcomes, true);
+        let r = render_results(&outcomes, true, false, 80);
         assert_eq!(r.failures, 1);
         assert_eq!(
             r.stderr,
             vec!["✗ g/*.rs: skipped (cancelled by sibling failure)"]
         );
+    }
+
+    // ── colored failure boxes ────────────────────────────────────────────────
+
+    #[test]
+    fn plain_box_is_unchanged_without_escapes() {
+        let style = BoxStyle {
+            width: 20,
+            ..BoxStyle::default()
+        };
+        let out = format_error_box("lint", 1, b"o1", b"e1\ne2", style);
+        let want = "\
+┌──────────────────┐
+│ FAILED: lint     │
+│ Exit code: 1     │
+├──────────────────┤
+│ e1               │
+│ e2               │
+├──────────────────┤
+│ stdout:          │
+│ o1               │
+└──────────────────┘";
+        assert_eq!(out, want);
+    }
+
+    #[test]
+    fn plain_box_strips_escapes() {
+        let out = format_error_box(
+            "x",
+            1,
+            b"",
+            b"\x1b[31merror\x1b[0m\x1b[2K!",
+            BoxStyle::default(),
+        );
+        assert!(out.contains("│ error!  "), "{out:?}");
+        assert!(!out.contains('\x1b'), "{out:?}");
+    }
+
+    #[test]
+    fn colored_box_is_red_and_keeps_command_colors() {
+        let style = BoxStyle {
+            colored: true,
+            timed_out: false,
+            width: 40,
+        };
+        let out = format_error_box("x", 1, b"", b"\x1b[31merror\x1b[0m\x1b[3A", style);
+        let first = out.lines().next().unwrap();
+        assert!(
+            first.starts_with("\x1b[31m┌") && first.ends_with("┐\x1b[0m"),
+            "{first:?}"
+        );
+        assert!(
+            out.contains("\x1b[31m│\x1b[0m \x1b[31mFAILED: x\x1b[0m"),
+            "{out:?}"
+        );
+        let content = out.lines().find(|l| l.contains("error")).unwrap();
+        assert!(
+            content.contains("\x1b[31merror\x1b[0m"),
+            "command color kept: {content:?}"
+        );
+        assert!(
+            content.contains("\x1b[0m\x1b[0m "),
+            "reset before padding: {content:?}"
+        );
+        assert!(
+            !content.contains("\x1b[3A"),
+            "cursor move removed: {content:?}"
+        );
+    }
+
+    #[test]
+    fn timed_out_box_is_yellow() {
+        let style = BoxStyle {
+            colored: true,
+            timed_out: true,
+            width: 40,
+        };
+        let out = format_error_box("x", -1, b"", b"timed out", style);
+        assert!(out.starts_with("\x1b[33m┌"), "{out:?}");
+        assert!(!out.contains("\x1b[31m"), "{out:?}");
+    }
+
+    #[test]
+    fn render_passes_color_and_timeout_through() {
+        let mut timed = failure();
+        if let CommandOutcome::Failure { timed_out, .. } = &mut timed {
+            *timed_out = true;
+        }
+        let r = render_results(&[failure(), timed], false, true, 80);
+        assert!(r.stderr[0].starts_with("\x1b[31m┌"));
+        assert!(r.stderr[1].starts_with("\x1b[33m┌"));
+    }
+
+    // ── full-width layout ────────────────────────────────────────────────────
+
+    #[test]
+    fn box_spans_width_and_wraps_long_lines() {
+        let style = BoxStyle {
+            width: 30,
+            ..BoxStyle::default()
+        };
+        let long = "x".repeat(30) + "日本";
+        let out = format_error_box("c", 1, b"", long.as_bytes(), style);
+        for line in out.lines() {
+            assert_eq!(unicode_width::UnicodeWidthStr::width(line), 30, "{line:?}");
+        }
+        assert!(out.contains(&format!("│ {} │", "x".repeat(26))), "{out}");
+        assert!(out.contains("│ xxxx日本"), "{out}");
+    }
+
+    #[test]
+    fn wrap_reopens_color_on_next_row() {
+        let rows = wrap("\x1b[31mabcd\x1b[0mef", 3);
+        let texts: Vec<_> = rows.iter().map(|(t, _)| t.as_str()).collect();
+        assert_eq!(texts, ["\x1b[31mabc", "\x1b[31md\x1b[0mef"]);
+        assert!(rows.iter().all(|(_, cols)| *cols == 3));
     }
 }

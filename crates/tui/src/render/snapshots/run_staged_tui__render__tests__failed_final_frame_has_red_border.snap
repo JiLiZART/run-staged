@@ -1,0 +1,20 @@
+---
+source: crates/tui/src/render/tests.rs
+expression: text(&t)
+---
+╭ run-staged ───────────────────────────── 3 files · 310ms ╮
+│ ✔ Backed up original state  4ms                          │
+│ ✗ Tasks failed  296ms                                    │
+│   ✔ format  *.{js,ts}  2 files                           │
+│     ✔ prettier --write  295ms                            │
+│     ✔ eslint --fix  295ms                                │
+│   ✗ rust  *.rs  1 file                                   │
+│     ✔ cargo fmt  295ms                                   │
+│     ✗ cargo clippy  295ms                                │
+│     ✔ cargo test  295ms                                  │
+│     ✔ taplo fmt  295ms                                   │
+│     ✔ typos  295ms                                       │
+│ ✔ Cleaned up temporary files  10ms                       │
+│                                                          │
+│ 7/7 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ │
+╰──────────────────────────────────────────────────────────╯

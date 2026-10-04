@@ -78,12 +78,12 @@ fn parse_config_at(path: &Path, source: ConfigSource) -> Result<Config, ConfigEr
     }
 }
 
-/// Load config from an explicit path (--config flag) or auto-discover from CWD.
+/// Load config from an explicit path (--config flag) or auto-discover from `start`.
 ///
 /// - If `explicit_path` is `Some`: bypass discovery, load that file directly.
 ///   Returns `Err(ConfigError::NotFound)` if the file does not exist.
-/// - If `explicit_path` is `None`: discover config from `std::env::current_dir()`.
-pub fn load_config(explicit_path: Option<&Path>) -> Result<Config, ConfigError> {
+/// - If `explicit_path` is `None`: discover config walking up from `start`.
+pub fn load_config(start: &Path, explicit_path: Option<&Path>) -> Result<Config, ConfigError> {
     if let Some(path) = explicit_path {
         if !path.exists() {
             return Err(ConfigError::NotFound);
@@ -91,8 +91,7 @@ pub fn load_config(explicit_path: Option<&Path>) -> Result<Config, ConfigError> 
         let source = ConfigSource::Explicit(path.to_path_buf());
         parse_config_at(path, source)
     } else {
-        let cwd = std::env::current_dir().map_err(ConfigError::Io)?;
-        let config_path = find_config_file(&cwd)?;
+        let config_path = find_config_file(start)?;
 
         // Determine the source type from the filename
         let filename = config_path
@@ -301,7 +300,7 @@ mod tests {
             "myconfig.toml",
             "[patterns]\n\"*.rs\" = [\"cargo fmt\"]\n",
         );
-        let config = load_config(Some(&path)).unwrap();
+        let config = load_config(Path::new("."), Some(&path)).unwrap();
         assert!(
             matches!(config.source, ConfigSource::Explicit(_)),
             "Expected Explicit source, got: {:?}",
@@ -313,7 +312,7 @@ mod tests {
     #[test]
     fn test_load_config_explicit_nonexistent_returns_not_found() {
         let path = PathBuf::from("/nonexistent/path/config.toml");
-        let result = load_config(Some(&path));
+        let result = load_config(Path::new("."), Some(&path));
         assert!(
             matches!(result, Err(ConfigError::NotFound)),
             "Expected ConfigNotFound, got: {result:?}"
@@ -321,15 +320,17 @@ mod tests {
     }
 
     #[test]
-    fn test_load_config_none_discovers_from_cwd() {
-        // We can't easily change CWD in tests, but we can verify that load_config(None)
-        // either returns a Config (if project has a config) or Err(ConfigNotFound).
-        // This test just verifies load_config(None) doesn't panic.
-        let result = load_config(None);
-        // Either Ok (found a config) or Err(ConfigNotFound) is acceptable
-        match result {
-            Ok(_) | Err(ConfigError::NotFound) => {}
-            Err(e) => panic!("Unexpected error from load_config(None): {e}"),
-        }
+    fn test_load_config_none_discovers_from_start() {
+        let dir = make_temp_dir("t-start");
+        make_git_root(&dir);
+        fs::create_dir_all(dir.join("sub")).unwrap();
+        write_file(
+            &dir,
+            "run-staged.toml",
+            "[g]\npatterns = { \"*.rs\" = [\"x\"] }\n",
+        );
+        let config = load_config(&dir.join("sub"), None).unwrap();
+        assert_eq!(config.groups[0].name, "g");
+        fs::remove_dir_all(&dir).ok();
     }
 }

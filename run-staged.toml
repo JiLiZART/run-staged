@@ -1,8 +1,8 @@
-timeout = "0sec"
+timeout = "2sec"
 
-[group1]
-timeout = "1sec"
-patterns = { '*.rs' = ['cargo fmt'], "*.{js,ts,tsx,jsx}" = ['npm run fmt'] }
+[fmt]
+timeout = "4sec"
+patterns = { '*.rs' = ['rustfmt'], "*.{js,ts,tsx,jsx}" = ['npm run fmt'] }
 
 [group2]
 timeout = "5s"
@@ -13,8 +13,8 @@ timeout = "5s"
 #  "npm run stylelint:staged"
 #]
 
-[group3.patterns]
+[clippy.patterns]
 "**/*.rs" = [
-  "cargo fmt",
+  "rustfmt",
   "cargo clippy",
 ]

@@ -13,7 +13,7 @@ use std::{
 };
 
 use run_staged_config::ConfigError;
-use run_staged_exec::CommandOutcome;
+use run_staged_exec::{CommandOutcome, ExecOptions, PlannedInvocation};
 use run_staged_git::{GitError, Repo};
 use run_staged_matcher::{MatchError, MatchedGroup};
 use thiserror::Error;
@@ -45,7 +45,7 @@ pub fn install_hook(cwd: &Path) -> Result<PathBuf, AppError> {
 }
 
 /// Inputs of one run. Paths are as the user gave them; `cwd` is the process cwd.
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 pub struct RunOptions {
     pub cwd: PathBuf,
     pub config_path: Option<PathBuf>,
@@ -53,6 +53,30 @@ pub struct RunOptions {
     pub allow_empty: bool,
     /// Value of `GIT_INDEX_FILE`, if set.
     pub index_file: Option<PathBuf>,
+    /// Per-command progress events and color forcing, passed to the executor.
+    pub exec: ExecOptions,
+}
+
+/// What a run will do, announced by [`StepEvent::Planned`] before the backup.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Plan {
+    /// `true` in `--unstaged` mode (only the tasks step runs).
+    pub unstaged: bool,
+    /// Distinct files matched by at least one group.
+    pub file_count: usize,
+    /// Groups with matched files, in declaration order.
+    pub groups: Vec<PlanGroup>,
+    /// Every invocation that may run, with the ids exec events carry.
+    pub invocations: Vec<PlannedInvocation>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlanGroup {
+    pub name: String,
+    /// Patterns that matched at least one file.
+    pub patterns: Vec<String>,
+    /// Distinct files matched in this group.
+    pub file_count: usize,
 }
 
 /// The run steps reported through [`StepEvent`].
@@ -66,6 +90,8 @@ pub enum Step {
 
 #[derive(Debug)]
 pub enum StepEvent<'a> {
+    /// The run's shape, emitted once after matching and before any step.
+    Planned(&'a Plan),
     Started(Step),
     Finished(Step),
     Failed(Step),
@@ -94,7 +120,7 @@ pub async fn run(
 ) -> Result<RunReport, AppError> {
     let start = Instant::now();
     let config_path = opts.config_path.as_ref().map(|p| opts.cwd.join(p));
-    let config = run_staged_config::load_config(config_path.as_deref())?;
+    let config = run_staged_config::load_config(&opts.cwd, config_path.as_deref())?;
     let repo = Repo::open(&opts.cwd, opts.index_file.clone())?;
 
     let files = match if opts.unstaged {
@@ -120,9 +146,23 @@ pub async fn run(
         file_count: distinct_files(&matched, |_| true).len(),
         ..Default::default()
     };
+    let plan = Plan {
+        unstaged: opts.unstaged,
+        file_count: report.file_count,
+        groups: matched
+            .iter()
+            .map(|g| PlanGroup {
+                name: g.group.name.clone(),
+                patterns: g.patterns.iter().map(|p| p.pattern.clone()).collect(),
+                file_count: distinct_files(std::slice::from_ref(g), |_| true).len(),
+            })
+            .collect(),
+        invocations: run_staged_exec::plan(&matched, repo.work_dir()),
+    };
+    on_step(StepEvent::Planned(&plan));
 
     if opts.unstaged {
-        report.outcomes = run_tasks(&matched, &config, repo.work_dir(), on_step).await;
+        report.outcomes = run_tasks(&matched, &config, repo.work_dir(), &opts.exec, on_step).await;
         report.error = first_failure(&report.outcomes);
         report.elapsed = start.elapsed();
         return Ok(report);
@@ -138,7 +178,7 @@ pub async fn run(
 
     step(on_step, Step::Backup, || repo.backup().map(drop))?;
 
-    report.outcomes = run_tasks(&matched, &config, repo.work_dir(), on_step).await;
+    report.outcomes = run_tasks(&matched, &config, repo.work_dir(), &opts.exec, on_step).await;
 
     if let Some(err) = first_failure(&report.outcomes) {
         report.error = Some(err);
@@ -208,10 +248,11 @@ async fn run_tasks(
     matched: &[MatchedGroup<'_>],
     config: &run_staged_config::Config,
     work_dir: &Path,
+    exec: &ExecOptions,
     on_step: &mut dyn FnMut(StepEvent<'_>),
 ) -> Vec<CommandOutcome> {
     on_step(StepEvent::Started(Step::Tasks));
-    let outcomes = run_staged_exec::execute_all(matched, config, work_dir).await;
+    let outcomes = run_staged_exec::execute_all_with(matched, config, work_dir, exec).await;
     on_step(StepEvent::Outcomes(&outcomes));
     if outcomes.iter().any(CommandOutcome::is_failure) {
         on_step(StepEvent::Failed(Step::Tasks));

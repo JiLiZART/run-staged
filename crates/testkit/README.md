@@ -63,6 +63,7 @@ process under test. Every call appends `{"args": [...], "cwd": "<rel>"}` to
 | `--stdout <text>`  | print to stdout                      |
 | `--stderr <text>`  | print to stderr                      |
 | `--exit <n>`       | exit code (default 0)                |
+| `--print-env <NAME>` | print `NAME=value` or `NAME=<unset>` to stdout (repeatable) |
 | `--copy-git-file <name>` | copy `<git-dir>/<name>` to `<git-dir>/fixture-tool.<name>` first (to observe mid-run state) |
 
 ## Runner options

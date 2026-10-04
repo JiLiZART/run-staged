@@ -1,0 +1,13 @@
+---
+source: crates/tui/src/render/tests.rs
+expression: s
+---
+╭ run-staged ─────────────────── 3 files · 100ms ╮
+│ ⠙ Running tasks for sta  100ms                 │
+│   ▸ format  *.{js,ts}  2 files                 │
+│     ⠙ prettier --write  100ms                  │
+│   ▸ rust  *.rs  1 file                         │
+│     ⠙ cargo test  100ms                        │
+│   … 8 more                                     │
+│ 0/7 ────────────────────────────────────────── │
+╰────────────────────────────────────────────────╯

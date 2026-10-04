@@ -1,0 +1,24 @@
+---
+source: crates/tui/src/render/tests.rs
+expression: "text(&render(&m, t0 + ms(1205), 60, 20, COLOR))"
+---
+╭ run-staged ───────────────────────────── 3 files · 1.21s ╮
+│ ✔ Backed up original state  4ms                          │
+│ ⠴ Running tasks for staged files…  1.20s                 │
+│   ▸ format  *.{js,ts}  2 files                           │
+│     ⠴ prettier --write  1.20s                            │
+│       │ checking src/b.ts                                │
+│     ✔ eslint --fix  640ms                                │
+│   ▸ rust  *.rs  1 file                                   │
+│     ✔ cargo fmt  210ms                                   │
+│     ✔ cargo clippy  895ms                                │
+│     ⠴ cargo test  1.20s                                  │
+│     ⠴ taplo fmt  1.20s                                   │
+│     ⠴ typos  1.20s                                       │
+│ ◌ Stage changes from tasks                               │
+│ ◌ Clean up temporary files                               │
+│                                                          │
+│                                                          │
+│                                                          │
+│ 3/7 ━━━━━━━━━━━━━━━━━━━━━━────────────────────────────── │
+╰──────────────────────────────────────────────────────────╯

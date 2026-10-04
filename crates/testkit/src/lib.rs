@@ -265,6 +265,23 @@ impl Repo {
         }
     }
 
+    /// The isolated environment (plus a PATH with `fixture-tool` first) as
+    /// key/value pairs, for spawning processes the [`Runner`] can't, such as
+    /// ones attached to a pseudo-terminal.
+    pub fn isolated_env_vars(&self) -> Vec<(OsString, OsString)> {
+        let mut cmd = Command::new("unused");
+        self.isolated_env(&mut cmd);
+        let tool_dir = fixture_tool_path().parent().unwrap().to_path_buf();
+        let path = std::env::var_os("PATH").unwrap_or_default();
+        let path =
+            std::env::join_paths(std::iter::once(tool_dir).chain(std::env::split_paths(&path)))
+                .expect("join PATH");
+        cmd.get_envs()
+            .filter_map(|(k, v)| Some((k.to_os_string(), v?.to_os_string())))
+            .chain(std::iter::once((OsString::from("PATH"), path)))
+            .collect()
+    }
+
     /// Runs `git` in the repository with the isolated env; panics on failure.
     pub fn git(&self, args: &[&str]) -> String {
         let out = self.git_output(args);

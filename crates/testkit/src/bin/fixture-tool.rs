@@ -6,6 +6,7 @@
 //! `<git-dir>/fixture-tool.log`, then applies the options in this order:
 //! `--copy-git-file`, sleep, file edits, stdout/stderr text, exit code.
 //!
+//! `--print-env <NAME>` (repeatable) prints `NAME=value` (or `NAME=<unset>`).
 //! `--copy-git-file <name>` copies `<git-dir>/<name>` to
 //! `<git-dir>/fixture-tool.<name>` so tests can see what existed mid-run.
 
@@ -26,6 +27,7 @@ struct Opts {
     stdout: Option<String>,
     stderr: Option<String>,
     copy_git_file: Option<String>,
+    print_env: Vec<String>,
     exit: i32,
     files: Vec<String>,
 }
@@ -51,6 +53,7 @@ fn parse(args: &[String]) -> Result<Opts, String> {
             "--stdout" => o.stdout = Some(val("--stdout")?),
             "--stderr" => o.stderr = Some(val("--stderr")?),
             "--copy-git-file" => o.copy_git_file = Some(val("--copy-git-file")?),
+            "--print-env" => o.print_env.push(val("--print-env")?),
             "--exit" => o.exit = val("--exit")?.parse().map_err(|e| format!("--exit: {e}"))?,
             "--" => o.files.extend(it.by_ref().cloned()),
             _ => o.files.push(a.clone()),
@@ -131,6 +134,10 @@ fn main() {
     }
     if let Some(t) = &o.stdout {
         println!("{t}");
+    }
+    for name in &o.print_env {
+        let value = env::var(name).unwrap_or_else(|_| "<unset>".into());
+        println!("{name}={value}");
     }
     if let Some(t) = &o.stderr {
         eprintln!("{t}");

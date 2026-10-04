@@ -74,6 +74,7 @@ The harness SHALL provide a `fixture-tool` executable that works the same on eve
 - optionally sleep for a given number of milliseconds;
 - optionally, for each file argument, append given text, replace the content, or delete the file;
 - optionally write given text to stdout or stderr;
+- optionally print the values of named environment variables to stdout, as `NAME=value` or `NAME=<unset>`;
 - optionally copy a named file from the git directory to `fixture-tool.<name>` in the git directory before anything else, so tests can see state that only exists mid-run;
 - exit with a given code (default 0).
 

@@ -1,0 +1,16 @@
+---
+source: crates/tui/src/term/tests.rs
+expression: text
+---
+╭ run-staged ──────────────────── 1 file · 126ms ╮
+│ ✔ Backed up original state  3ms                │
+│ ✔ Ran tasks for staged files  117ms            │
+│   ✔ fmt  *.js  1 file                          │
+│     ✔ prettier --write  116ms                  │
+│ ✔ Staged changes from tasks  5ms               │
+│ ✔ Cleaned up temporary files  1ms              │
+│                                                │
+│                                                │
+│                                                │
+│ 1/1 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ │
+╰────────────────────────────────────────────────╯

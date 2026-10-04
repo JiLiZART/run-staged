@@ -15,7 +15,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use tokio::io::AsyncReadExt;
+use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::process::Command;
 use tokio::task::JoinSet;
 use tokio::time::timeout as tokio_timeout;
@@ -57,6 +57,8 @@ pub enum CommandOutcome {
         exit_code: i32,
         stdout: Vec<u8>,
         stderr: Vec<u8>,
+        /// True when the invocation was killed because its timeout elapsed.
+        timed_out: bool,
     },
     /// Cancelled before spawn because the per-group cancel flag was set by a
     /// sibling failure under `Group.continue_on_error == false` (D-13).
@@ -77,11 +79,87 @@ impl CommandOutcome {
     }
 }
 
+/// Progress of one invocation, identified by its [`PlannedInvocation::id`].
+#[derive(Debug, Clone)]
+pub enum ExecEvent {
+    /// The process was spawned.
+    Started { id: usize },
+    /// One line (split on `\n` or `\r`) the process wrote to stdout or stderr,
+    /// decoded lossily. Escape sequences are left in; consumers sanitize.
+    Line { id: usize, text: String },
+    /// The invocation ended: success, failure, timeout, or cancellation.
+    Finished { id: usize, outcome: CommandOutcome },
+}
+
+/// Receives [`ExecEvent`]s from every running invocation.
+pub type EventSink = Arc<dyn Fn(ExecEvent) + Send + Sync>;
+
+/// Optional behavior for [`execute_all_with`].
+#[derive(Clone, Default)]
+pub struct ExecOptions {
+    /// Progress listener; `None` costs nothing.
+    pub events: Option<EventSink>,
+    /// Start commands with `FORCE_COLOR=1` and `CLICOLOR_FORCE=1` unless the
+    /// environment already sets `FORCE_COLOR`, `CLICOLOR_FORCE`, or `NO_COLOR`.
+    pub force_color: bool,
+}
+
+/// One scheduled invocation, as [`execute_all_with`] will run it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlannedInvocation {
+    pub id: usize,
+    pub group: String,
+    pub pattern: String,
+    pub command: String,
+    pub file_count: usize,
+}
+
+/// Every invocation [`execute_all_with`] may run, in schedule order, with the
+/// ids its [`ExecEvent`]s will carry. Groups skipped at run time (after an
+/// earlier group fails) are still listed.
+pub fn plan(matched_groups: &[MatchedGroup<'_>], git_root: &Path) -> Vec<PlannedInvocation> {
+    expand(matched_groups, git_root)
+        .into_iter()
+        .filter_map(Result::ok)
+        .flatten()
+        .map(|t| PlannedInvocation {
+            id: t.id,
+            group: t.group_name,
+            pattern: t.pattern,
+            command: t.command,
+            file_count: t.file_count,
+        })
+        .collect()
+}
+
+/// Expands every group into tasks and numbers them in order. The single source
+/// of invocation ids for both [`plan`] and [`execute_all_with`].
+fn expand(
+    matched_groups: &[MatchedGroup<'_>],
+    git_root: &Path,
+) -> Vec<Result<Vec<Task>, ExecError>> {
+    let mut next_id = 0;
+    matched_groups
+        .iter()
+        .map(|g| {
+            tasks_for_group(g, git_root).map(|mut tasks| {
+                for t in &mut tasks {
+                    t.id = next_id;
+                    next_id += 1;
+                }
+                tasks
+            })
+        })
+        .collect()
+}
+
 /// One unit of work: a fully-built argv plus the metadata needed to construct
 /// a [`CommandOutcome`] after spawn completes. One `MatchedPattern` may expand
 /// into many `Task`s under per-file mode or ARG_MAX chunking.
 #[derive(Debug, Clone)]
 struct Task {
+    /// Invocation id, assigned by [`expand`].
+    id: usize,
     group_name: String,
     pattern: String,
     /// Original command string from config (for reporting in CommandOutcome).
@@ -116,6 +194,24 @@ async fn run_one(
     task: Task,
     cancel: Arc<AtomicBool>,
     effective_timeout: Option<Duration>,
+    opts: ExecOptions,
+) -> CommandOutcome {
+    let id = task.id;
+    let outcome = run_one_inner(task, cancel, effective_timeout, &opts).await;
+    if let Some(sink) = &opts.events {
+        sink(ExecEvent::Finished {
+            id,
+            outcome: outcome.clone(),
+        });
+    }
+    outcome
+}
+
+async fn run_one_inner(
+    task: Task,
+    cancel: Arc<AtomicBool>,
+    effective_timeout: Option<Duration>,
+    opts: &ExecOptions,
 ) -> CommandOutcome {
     if cancel.load(Ordering::Relaxed) {
         return CommandOutcome::Cancelled {
@@ -134,13 +230,15 @@ async fn run_one(
     }
 
     // Manual spawn — keep Child so we can kill on timeout.
-    let mut child = match Command::new(&task.argv[0])
-        .args(&task.argv[1..])
+    let mut cmd = Command::new(&task.argv[0]);
+    cmd.args(&task.argv[1..])
         .current_dir(&task.working_dir)
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-    {
+        .stderr(Stdio::piped());
+    if opts.force_color && !color_env_already_set() {
+        cmd.env("FORCE_COLOR", "1").env("CLICOLOR_FORCE", "1");
+    }
+    let mut child = match cmd.spawn() {
         Ok(c) => c,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             return failure_outcome_command_not_found(&task, start.elapsed());
@@ -150,11 +248,20 @@ async fn run_one(
         }
     };
 
-    // Take stdout/stderr handles so `child.wait()` can advance. We drain
-    // them *after* the process exits — child output is small (lint/format
-    // stderr-summary scale) so a deferred read is acceptable.
-    let stdout_handle = child.stdout.take();
-    let stderr_handle = child.stderr.take();
+    if let Some(sink) = &opts.events {
+        sink(ExecEvent::Started { id: task.id });
+    }
+
+    // Read both pipes while the child runs: the full bytes are captured for the
+    // failure box, and complete lines are streamed to the listener.
+    let stdout_reader = child
+        .stdout
+        .take()
+        .map(|h| tokio::spawn(pump(h, task.id, opts.events.clone())));
+    let stderr_reader = child
+        .stderr
+        .take()
+        .map(|h| tokio::spawn(pump(h, task.id, opts.events.clone())));
 
     let exit_status_result = match effective_timeout {
         Some(d) => match tokio_timeout(d, child.wait()).await {
@@ -164,6 +271,10 @@ async fn run_one(
                 // Unix; TerminateProcess on Windows). After this, `child` has
                 // been reaped by `kill().await`, so we can drop the handles.
                 terminate(&mut child).await;
+                // A grandchild may still hold the pipes open; don't wait for it.
+                for reader in [stdout_reader, stderr_reader].into_iter().flatten() {
+                    reader.abort();
+                }
                 return failure_outcome_timeout(&task, start.elapsed(), d);
             }
         },
@@ -177,15 +288,14 @@ async fn run_one(
         }
     };
 
-    // Drain captured stdout / stderr.
-    let mut stdout_buf = Vec::new();
-    if let Some(mut h) = stdout_handle {
-        let _ = h.read_to_end(&mut stdout_buf).await;
-    }
-    let mut stderr_buf = Vec::new();
-    if let Some(mut h) = stderr_handle {
-        let _ = h.read_to_end(&mut stderr_buf).await;
-    }
+    let stdout_buf = match stdout_reader {
+        Some(r) => r.await.unwrap_or_default(),
+        None => Vec::new(),
+    };
+    let stderr_buf = match stderr_reader {
+        Some(r) => r.await.unwrap_or_default(),
+        None => Vec::new(),
+    };
 
     let duration = start.elapsed();
     if exit_status.success() {
@@ -209,8 +319,53 @@ async fn run_one(
             exit_code: exit_status.code().unwrap_or(-1),
             stdout: stdout_buf,
             stderr: stderr_buf,
+            timed_out: false,
         }
     }
+}
+
+/// Reads `r` to the end, returning every byte. With a listener, each complete
+/// non-empty line (split on `\n` or `\r`) is also sent as [`ExecEvent::Line`].
+async fn pump<R: AsyncRead + Unpin>(mut r: R, id: usize, sink: Option<EventSink>) -> Vec<u8> {
+    let mut all = Vec::new();
+    let mut line = Vec::new();
+    let mut chunk = [0u8; 8192];
+    let emit = |line: &mut Vec<u8>| {
+        if let Some(sink) = &sink
+            && !line.is_empty()
+        {
+            sink(ExecEvent::Line {
+                id,
+                text: String::from_utf8_lossy(line).into_owned(),
+            });
+        }
+        line.clear();
+    };
+    loop {
+        let n = match r.read(&mut chunk).await {
+            Ok(0) | Err(_) => break,
+            Ok(n) => n,
+        };
+        all.extend_from_slice(&chunk[..n]);
+        if sink.is_some() {
+            for &b in &chunk[..n] {
+                if b == b'\n' || b == b'\r' {
+                    emit(&mut line);
+                } else {
+                    line.push(b);
+                }
+            }
+        }
+    }
+    emit(&mut line);
+    all
+}
+
+/// True when the user's environment already decides colors for commands.
+fn color_env_already_set() -> bool {
+    ["FORCE_COLOR", "CLICOLOR_FORCE", "NO_COLOR"]
+        .iter()
+        .any(|v| std::env::var_os(v).is_some())
 }
 
 /// Cross-platform child termination after a timeout fired.
@@ -259,6 +414,7 @@ fn failure_outcome_timeout(
         exit_code: -1,
         stdout: Vec::new(),
         stderr: err.to_string().into_bytes(),
+        timed_out: true,
     }
 }
 
@@ -275,6 +431,7 @@ fn failure_outcome_command_not_found(task: &Task, duration: Duration) -> Command
         exit_code: 127,
         stdout: Vec::new(),
         stderr: format!("command not found: {}", task.argv[0]).into_bytes(),
+        timed_out: false,
     }
 }
 
@@ -296,6 +453,7 @@ fn failure_outcome_io_msg(task: &Task, duration: Duration, msg: String) -> Comma
         exit_code: -1,
         stdout: Vec::new(),
         stderr: msg.into_bytes(),
+        timed_out: false,
     }
 }
 
@@ -320,6 +478,7 @@ fn tasks_for_group(matched: &MatchedGroup<'_>, git_root: &Path) -> Result<Vec<Ta
                     let file_slice = std::slice::from_ref(file);
                     let argv = build_argv(command_str, file_slice, group.path_format, git_root)?;
                     tasks.push(Task {
+                        id: 0,
                         group_name: group.name.clone(),
                         pattern: pattern.pattern.clone(),
                         command: command_str.clone(),
@@ -342,6 +501,7 @@ fn tasks_for_group(matched: &MatchedGroup<'_>, git_root: &Path) -> Result<Vec<Ta
                 for chunk in chunks {
                     let argv = build_argv(command_str, chunk, group.path_format, git_root)?;
                     tasks.push(Task {
+                        id: 0,
                         group_name: group.name.clone(),
                         pattern: pattern.pattern.clone(),
                         command: command_str.clone(),
@@ -364,11 +524,13 @@ async fn execute_group_parallel(
     cancel: Arc<AtomicBool>,
     continue_on_error: bool,
     effective_timeout: Option<Duration>,
+    opts: &ExecOptions,
 ) -> Vec<CommandOutcome> {
     let mut set: JoinSet<CommandOutcome> = JoinSet::new();
     for task in tasks {
         let cancel_for_task = Arc::clone(&cancel);
-        set.spawn(async move { run_one(task, cancel_for_task, effective_timeout).await });
+        let opts = opts.clone();
+        set.spawn(async move { run_one(task, cancel_for_task, effective_timeout, opts).await });
     }
 
     let mut outcomes = Vec::new();
@@ -385,6 +547,7 @@ async fn execute_group_parallel(
                 exit_code: -1,
                 stdout: vec![],
                 stderr: format!("task panicked: {e}").into_bytes(),
+                timed_out: false,
             },
         };
         if outcome.is_failure() && !continue_on_error {
@@ -404,10 +567,11 @@ async fn execute_group_sequential(
     cancel: Arc<AtomicBool>,
     continue_on_error: bool,
     effective_timeout: Option<Duration>,
+    opts: &ExecOptions,
 ) -> Vec<CommandOutcome> {
     let mut outcomes = Vec::with_capacity(tasks.len());
     for task in tasks {
-        let outcome = run_one(task, Arc::clone(&cancel), effective_timeout).await;
+        let outcome = run_one(task, Arc::clone(&cancel), effective_timeout, opts.clone()).await;
         if outcome.is_failure() && !continue_on_error {
             cancel.store(true, Ordering::Relaxed);
         }
@@ -455,15 +619,25 @@ pub async fn execute_all(
     config: &Config,
     git_root: &Path,
 ) -> Vec<CommandOutcome> {
+    execute_all_with(matched_groups, config, git_root, &ExecOptions::default()).await
+}
+
+/// [`execute_all`] plus progress events and color forcing, see [`ExecOptions`].
+pub async fn execute_all_with(
+    matched_groups: &[MatchedGroup<'_>],
+    config: &Config,
+    git_root: &Path,
+    opts: &ExecOptions,
+) -> Vec<CommandOutcome> {
     let mut all_outcomes: Vec<CommandOutcome> = Vec::new();
 
-    for matched in matched_groups {
+    for (matched, tasks) in matched_groups.iter().zip(expand(matched_groups, git_root)) {
         // Per-group cancel flag — fresh for each group so a previous group's
         // failure doesn't leak cancellation into the next one (when global
         // continue_on_error allows continuation).
         let cancel = Arc::new(AtomicBool::new(false));
 
-        let tasks = match tasks_for_group(matched, git_root) {
+        let tasks = match tasks {
             Ok(t) => t,
             Err(e) => {
                 // build_argv shlex failure — surface as a synthetic Failure
@@ -478,6 +652,7 @@ pub async fn execute_all(
                     exit_code: -1,
                     stdout: vec![],
                     stderr: format!("argv build failed: {e}").into_bytes(),
+                    timed_out: false,
                 });
                 if !config.continue_on_error {
                     break;
@@ -503,6 +678,7 @@ pub async fn execute_all(
                     cancel,
                     matched.group.continue_on_error,
                     effective_timeout,
+                    opts,
                 )
                 .await
             }
@@ -512,6 +688,7 @@ pub async fn execute_all(
                     cancel,
                     matched.group.continue_on_error,
                     effective_timeout,
+                    opts,
                 )
                 .await
             }
@@ -1312,7 +1489,10 @@ mod tests {
         );
         match &outcomes[0] {
             CommandOutcome::Failure {
-                exit_code, stderr, ..
+                exit_code,
+                stderr,
+                timed_out,
+                ..
             } => {
                 let s = String::from_utf8_lossy(stderr);
                 assert!(
@@ -1320,6 +1500,7 @@ mod tests {
                     "stderr should mention 'timed out', got {s:?}"
                 );
                 assert_eq!(*exit_code, -1, "timeout failure must use exit_code -1");
+                assert!(*timed_out, "timeout failure must set timed_out");
             }
             other => panic!("expected Failure, got {other:?}"),
         }
@@ -1376,5 +1557,202 @@ mod tests {
             "expected Success when timeout is None, got {:?}",
             outcomes[0]
         );
+    }
+
+    // ---- plan + events ----
+
+    use std::sync::Mutex;
+
+    fn collect() -> (EventSink, Arc<Mutex<Vec<ExecEvent>>>) {
+        let log = Arc::new(Mutex::new(Vec::new()));
+        let sink_log = Arc::clone(&log);
+        let sink: EventSink = Arc::new(move |e| sink_log.lock().unwrap().push(e));
+        (sink, log)
+    }
+
+    fn opts_with(sink: EventSink) -> ExecOptions {
+        ExecOptions {
+            events: Some(sink),
+            force_color: false,
+        }
+    }
+
+    #[test]
+    fn plan_ids_are_unique_and_ordered() {
+        let mut per_file = make_group("pf", ExecutionOrder::Parallel, true, true);
+        per_file.chunk_size = None;
+        let mut chunked = make_group("ch", ExecutionOrder::Parallel, true, false);
+        chunked.chunk_size = Some(2);
+        let groups = [
+            MatchedGroup {
+                group: &per_file,
+                patterns: vec![pattern_with_files("*.a", "lint", vec!["1.a", "2.a"])],
+            },
+            MatchedGroup {
+                group: &chunked,
+                patterns: vec![pattern_with_files("*.b", "fmt", vec!["1.b", "2.b", "3.b"])],
+            },
+        ];
+        let p = plan(&groups, &root());
+        let ids: Vec<usize> = p.iter().map(|i| i.id).collect();
+        assert_eq!(ids, vec![0, 1, 2, 3]);
+        assert_eq!(p[0].group, "pf");
+        assert_eq!(p[2].file_count, 2);
+        assert_eq!(p[3].file_count, 1);
+        // Planning twice gives the same ids.
+        assert_eq!(plan(&groups, &root()), p);
+    }
+
+    #[test]
+    fn non_timeout_failures_are_not_timed_out() {
+        let task = Task {
+            id: 0,
+            group_name: "g".into(),
+            pattern: "p".into(),
+            command: "c".into(),
+            argv: vec!["c".into()],
+            file_count: 1,
+            working_dir: root(),
+        };
+        for o in [
+            failure_outcome_command_not_found(&task, Duration::ZERO),
+            failure_outcome_io_msg(&task, Duration::ZERO, "x".into()),
+        ] {
+            assert!(matches!(
+                o,
+                CommandOutcome::Failure {
+                    timed_out: false,
+                    ..
+                }
+            ));
+        }
+    }
+
+    async fn run_with_events(
+        order: ExecutionOrder,
+        commands: Vec<String>,
+    ) -> (Vec<CommandOutcome>, Vec<ExecEvent>, Vec<PlannedInvocation>) {
+        let g = make_group("g", order, false, false);
+        let mg = MatchedGroup {
+            group: &g,
+            patterns: vec![MatchedPattern {
+                pattern: "*.x".into(),
+                commands,
+                files: vec![PathBuf::from("a.x")],
+            }],
+        };
+        let planned = plan(std::slice::from_ref(&mg), &root());
+        let (sink, log) = collect();
+        let outcomes = execute_all_with(&[mg], &make_config(true), &root(), &opts_with(sink)).await;
+        let events = log.lock().unwrap().clone();
+        (outcomes, events, planned)
+    }
+
+    fn finished_ids(events: &[ExecEvent]) -> Vec<usize> {
+        let mut v: Vec<usize> = events
+            .iter()
+            .filter_map(|e| match e {
+                ExecEvent::Finished { id, .. } => Some(*id),
+                _ => None,
+            })
+            .collect();
+        v.sort();
+        v
+    }
+
+    #[tokio::test]
+    async fn events_for_parallel_group() {
+        let (outcomes, events, planned) = run_with_events(
+            ExecutionOrder::Parallel,
+            vec![ft("--stdout one"), ft("--stdout two")],
+        )
+        .await;
+        assert_eq!(outcomes.len(), 2);
+        let all: Vec<usize> = planned.iter().map(|p| p.id).collect();
+        assert_eq!(finished_ids(&events), all, "one Finished per invocation");
+        for id in &all {
+            let started = events
+                .iter()
+                .filter(|e| matches!(e, ExecEvent::Started { id: i } if i == id))
+                .count();
+            assert_eq!(started, 1, "one Started for id {id}");
+            let pos = |pred: &dyn Fn(&ExecEvent) -> bool| events.iter().position(pred).unwrap();
+            assert!(
+                pos(&|e| matches!(e, ExecEvent::Started { id: i } if i == id))
+                    < pos(&|e| matches!(e, ExecEvent::Finished { id: i, .. } if i == id))
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn lines_are_streamed_in_order_and_capture_is_unchanged() {
+        let (outcomes, events, _) = run_with_events(
+            ExecutionOrder::Sequential,
+            vec![ft("--stdout first --stderr err")],
+        )
+        .await;
+        // `first` arrives on stdout and `err` on stderr, each as its own line.
+        let lines: Vec<String> = events
+            .iter()
+            .filter_map(|e| match e {
+                ExecEvent::Line { text, .. } => Some(text.clone()),
+                _ => None,
+            })
+            .collect();
+        assert!(lines.contains(&"first".to_string()), "{lines:?}");
+        assert!(lines.contains(&"err".to_string()), "{lines:?}");
+        match &outcomes[0] {
+            CommandOutcome::Success { stdout, .. } => assert_eq!(stdout, b"first\n"),
+            other => panic!("expected Success, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn carriage_returns_split_lines() {
+        let (_, events, _) = run_with_events(
+            ExecutionOrder::Sequential,
+            vec![format!(
+                "{} --stdout {}",
+                ft(""),
+                shlex::try_quote("10%\r50%\r100%").unwrap()
+            )],
+        )
+        .await;
+        let lines: Vec<String> = events
+            .iter()
+            .filter_map(|e| match e {
+                ExecEvent::Line { text, .. } => Some(text.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(lines, vec!["10%", "50%", "100%"]);
+    }
+
+    #[tokio::test]
+    async fn cancelled_invocation_finishes_without_starting() {
+        let (outcomes, events, planned) =
+            run_with_events(ExecutionOrder::Sequential, vec![ft("--exit 1"), ft("")]).await;
+        assert!(matches!(outcomes[1], CommandOutcome::Cancelled { .. }));
+        let second = planned[1].id;
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, ExecEvent::Started { id } if *id == second))
+        );
+        assert!(events.iter().any(
+            |e| matches!(e, ExecEvent::Finished { id, outcome: CommandOutcome::Cancelled { .. } } if *id == second)
+        ));
+    }
+
+    #[tokio::test]
+    async fn no_listener_still_works() {
+        let g = make_group("g", ExecutionOrder::Parallel, true, false);
+        let mg = MatchedGroup {
+            group: &g,
+            patterns: vec![pattern_with_files("*.x", &ft("--stdout hi"), vec!["a.x"])],
+        };
+        let outcomes =
+            execute_all_with(&[mg], &make_config(true), &root(), &ExecOptions::default()).await;
+        assert!(matches!(outcomes[0], CommandOutcome::Success { .. }));
     }
 }
