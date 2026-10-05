@@ -69,3 +69,9 @@ yourself.
 | no colors anywhere (still animated) | `NO_COLOR=1 run-staged` |
 | plain-text output                | `TERM=dumb run-staged`   |
 | only failures, no panel          | `run-staged --quiet`     |
+
+## Benchmarks
+
+Comparison with lint-staged, nano-staged, lefthook, pre-commit, prek, hk,
+stagelint and overcommit: see [bench/RESULTS.md](bench/RESULTS.md). To reproduce
+them, see [bench/README.md](bench/README.md).

@@ -134,3 +134,6 @@ Cargo.lock
 .idea
 .claude/settings.local.json
 CLAUDE.local.md
+
+# bench
+bench/results/

@@ -1,0 +1,10 @@
+{
+  "name": "run-staged-bench",
+  "private": true,
+  "description": "Pinned JS competitors for bench/run.sh",
+  "devDependencies": {
+    "lefthook": "2.1.16",
+    "lint-staged": "17.6.0",
+    "nano-staged": "1.0.2"
+  }
+}
