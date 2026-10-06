@@ -12,6 +12,7 @@
 use std::{
     io::Read,
     path::{Path, PathBuf},
+    sync::{Arc, Mutex},
 };
 
 use gix::{
@@ -21,12 +22,14 @@ use gix::{
 
 mod error;
 mod hook;
+mod snapshot;
 mod write;
 
 pub use error::GitError;
 use error::git_err;
 pub use gix::ObjectId;
 pub use hook::{HOOK_MARKER, install_hook};
+pub use snapshot::{Changes, Snapshot};
 
 /// File name of the index backup inside the git dir.
 pub const BACKUP_FILE: &str = "run-staged.index";
@@ -36,6 +39,8 @@ pub struct Repo {
     repo: gix::Repository,
     work_dir: PathBuf,
     index_path: PathBuf,
+    /// The index as first read, shared by all reads; [`Repo::stage`] clears it.
+    index: Mutex<Option<Arc<gix::index::File>>>,
 }
 
 impl Repo {
@@ -53,6 +58,7 @@ impl Repo {
             repo,
             work_dir,
             index_path,
+            index: Mutex::new(None),
         })
     }
 
@@ -87,6 +93,21 @@ impl Repo {
         .map_err(git_err)
     }
 
+    /// The cached read-only index, loaded on first use.
+    fn index(&self) -> Result<Arc<gix::index::File>, GitError> {
+        let mut cached = self.index.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(index) = cached.as_ref() {
+            return Ok(Arc::clone(index));
+        }
+        let index = Arc::new(self.load_index()?);
+        *cached = Some(Arc::clone(&index));
+        Ok(index)
+    }
+
+    fn forget_index(&self) {
+        *self.index.lock().unwrap_or_else(|e| e.into_inner()) = None;
+    }
+
     /// HEAD's tree as an index, or `None` when HEAD is unborn.
     fn head_index(&self) -> Result<Option<gix::index::File>, GitError> {
         let Ok(tree) = self.repo.head_tree_id() else {
@@ -99,7 +120,7 @@ impl Repo {
     /// renamed under the new path). Deleted files, conflicts, and submodules are
     /// excluded. With an unborn HEAD every index entry counts.
     pub fn staged_files(&self) -> Result<Vec<PathBuf>, GitError> {
-        let index = self.load_index()?;
+        let index = self.index()?;
         let head = self.head_index()?;
         let files: Vec<PathBuf> = index
             .entries()
@@ -122,8 +143,8 @@ impl Repo {
     /// Tracked files whose working-tree content differs from the index.
     /// Deleted and untracked files are excluded. An empty list is not an error.
     pub fn unstaged_files(&self) -> Result<Vec<PathBuf>, GitError> {
-        let index = self.load_index()?;
-        let mut hasher = Hasher::new(self)?;
+        let index = self.index()?;
+        let mut hasher = Hasher::new(&self.repo, &self.work_dir)?;
         let mut files = Vec::new();
         for e in index.entries() {
             if e.stage() != Stage::Unconflicted || e.mode == Mode::COMMIT {
@@ -148,51 +169,22 @@ impl Repo {
         }
         Ok(files)
     }
-
-    /// Blob ids of the working-tree content of `paths` (after git's
-    /// worktree-to-git conversion, e.g. autocrlf), `None` for missing files.
-    /// Nothing is written to the object database.
-    pub fn worktree_ids(&self, paths: &[PathBuf]) -> Result<Vec<Option<ObjectId>>, GitError> {
-        let index = self.load_index()?;
-        let mut hasher = Hasher::new(self)?;
-        paths
-            .iter()
-            .map(|p| hasher.worktree_id(to_bstring(p).as_ref(), &index))
-            .collect()
-    }
-
-    /// The subset of `paths` whose working-tree content differs from the index
-    /// entry: they have unstaged changes on top of what is staged.
-    pub fn partially_staged(&self, paths: &[PathBuf]) -> Result<Vec<PathBuf>, GitError> {
-        let index = self.load_index()?;
-        let mut hasher = Hasher::new(self)?;
-        let mut out = Vec::new();
-        for p in paths {
-            let rela = to_bstring(p);
-            let Some(entry) = index.entry_by_path_and_stage(rela.as_ref(), Stage::Unconflicted)
-            else {
-                continue;
-            };
-            if hasher.worktree_id(rela.as_ref(), &index)? != Some(entry.id) {
-                out.push(p.clone());
-            }
-        }
-        Ok(out)
-    }
 }
 
 /// Hashes working-tree files the way `git add` would, without writing objects.
 struct Hasher<'r> {
-    repo: &'r Repo,
+    repo: &'r gix::Repository,
+    work_dir: &'r Path,
     pipeline: gix::filter::Pipeline<'r>,
     buf: Vec<u8>,
 }
 
 impl<'r> Hasher<'r> {
-    fn new(repo: &'r Repo) -> Result<Self, GitError> {
-        let (pipeline, _) = repo.repo.filter_pipeline(None).map_err(git_err)?;
+    fn new(repo: &'r gix::Repository, work_dir: &'r Path) -> Result<Self, GitError> {
+        let (pipeline, _) = repo.filter_pipeline(None).map_err(git_err)?;
         Ok(Hasher {
             repo,
+            work_dir,
             pipeline,
             buf: Vec::new(),
         })
@@ -206,7 +198,7 @@ impl<'r> Hasher<'r> {
         use gix::filter::plumbing::pipeline::convert::ToGitOutcome;
 
         let rel_path = gix::path::from_bstr(rela);
-        let abs = self.repo.work_dir.join(&rel_path);
+        let abs = self.work_dir.join(&rel_path);
         let md = match std::fs::symlink_metadata(&abs) {
             Ok(md) => md,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -235,13 +227,9 @@ impl<'r> Hasher<'r> {
         } else {
             return Ok(None);
         }
-        gix::objs::compute_hash(
-            self.repo.repo.object_hash(),
-            gix::objs::Kind::Blob,
-            &self.buf,
-        )
-        .map(Some)
-        .map_err(git_err)
+        gix::objs::compute_hash(self.repo.object_hash(), gix::objs::Kind::Blob, &self.buf)
+            .map(Some)
+            .map_err(git_err)
     }
 }
 

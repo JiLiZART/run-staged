@@ -1,12 +1,12 @@
 use std::{
-    path::PathBuf,
+    path::{Path, PathBuf},
     thread,
     time::{Duration, Instant},
 };
 
 use run_staged_testkit::Repo as Fixture;
 
-use crate::{GitError, Repo};
+use crate::{Changes, GitError, Repo};
 
 fn open(fx: &Fixture) -> Repo {
     Repo::open(fx.root(), None).expect("open")
@@ -108,10 +108,8 @@ fn reads_ignore_a_held_index_lock() {
     let repo = open(&fx);
     assert_eq!(repo.staged_files().unwrap(), paths(&["a.js"]));
     assert_eq!(repo.unstaged_files().unwrap(), paths(&["a.js"]));
-    assert_eq!(
-        repo.partially_staged(&paths(&["a.js"])).unwrap(),
-        paths(&["a.js"])
-    );
+    let snap = repo.snapshot(&paths(&["a.js"])).unwrap();
+    assert_eq!(snap.partially_staged(), [Path::new("a.js")]);
     repo.backup().unwrap();
     assert_eq!(std::fs::read(&lock).unwrap(), b"held");
     assert_eq!(
@@ -163,38 +161,42 @@ fn crlf_with_autocrlf_is_not_a_change() {
     // The blob in git is LF; the working tree has CRLF.
     assert_eq!(fx.index_content("a.txt").unwrap(), "line1\nline2\n");
     let repo = open(&fx);
-    assert!(
-        repo.partially_staged(&paths(&["a.txt"]))
-            .unwrap()
-            .is_empty()
-    );
+    let snap = repo.snapshot(&paths(&["a.txt"])).unwrap();
+    assert!(snap.partially_staged().is_empty());
     assert!(repo.unstaged_files().unwrap().is_empty());
 }
 
+fn object_count(fx: &Fixture) -> usize {
+    std::fs::read_dir(fx.git_dir().join("objects"))
+        .unwrap()
+        .filter_map(Result::ok)
+        .filter(|d| d.file_name().len() == 2)
+        .map(|d| std::fs::read_dir(d.path()).unwrap().count())
+        .sum()
+}
+
 #[test]
-fn worktree_ids_detect_edits_and_deletions() {
+fn changes_detect_edits_and_deletions() {
     let fx = Fixture::builder()
         .staged("a.js", "a")
         .staged("b.js", "b")
+        .staged("c.js", "c")
         .build();
     let repo = open(&fx);
-    let files = paths(&["a.js", "b.js"]);
-    let before = repo.worktree_ids(&files).unwrap();
-    assert!(before.iter().all(Option::is_some));
+    let snap = repo.snapshot(&paths(&["a.js", "b.js", "c.js"])).unwrap();
+    let objects = object_count(&fx);
     fx.write("a.js", "formatted");
     std::fs::remove_file(fx.root().join("b.js")).unwrap();
-    let after = repo.worktree_ids(&files).unwrap();
-    assert_ne!(before[0], after[0]);
-    assert_eq!(after[1], None);
-    // Hashing writes no objects: the new content is not in the odb.
-    let id = after[0].unwrap().to_string();
-    assert!(
-        !fx.git_dir()
-            .join("objects")
-            .join(&id[..2])
-            .join(&id[2..])
-            .exists()
+    assert_eq!(
+        repo.changes(&snap).unwrap(),
+        Changes {
+            changed: paths(&["a.js"]),
+            deleted: paths(&["b.js"]),
+            partial_modified: vec![],
+        }
     );
+    // Hashing writes no objects.
+    assert_eq!(object_count(&fx), objects);
 }
 
 #[test]
@@ -205,12 +207,102 @@ fn partially_staged_detection() {
         .unstaged("p.js", "3")
         .staged("full.js", "x")
         .build();
+    let snap = open(&fx).snapshot(&paths(&["p.js", "full.js"])).unwrap();
+    assert_eq!(snap.partially_staged(), [Path::new("p.js")]);
+}
+
+#[test]
+fn modified_partial_file_is_reported_not_changed() {
+    let fx = Fixture::builder()
+        .committed("p.js", "1")
+        .staged("p.js", "2")
+        .unstaged("p.js", "3")
+        .build();
+    let repo = open(&fx);
+    let snap = repo.snapshot(&paths(&["p.js"])).unwrap();
+    fx.write("p.js", "3 formatted");
+    let changes = repo.changes(&snap).unwrap();
+    assert_eq!(changes.partial_modified, paths(&["p.js"]));
+    assert!(changes.changed.is_empty());
+}
+
+#[test]
+fn stale_stat_same_content_is_neither_partial_nor_changed() {
+    let fx = Fixture::builder().staged("a.js", "same").build();
+    // Same bytes, new stat: the index entry's stat no longer matches.
+    fx.write("a.js", "same");
+    let repo = open(&fx);
+    let snap = repo.snapshot(&paths(&["a.js"])).unwrap();
+    assert!(snap.partially_staged().is_empty());
+    assert_eq!(repo.changes(&snap).unwrap(), Changes::default());
+}
+
+#[test]
+fn rewrite_with_identical_content_is_not_a_change() {
+    let fx = Fixture::builder().staged("a.js", "same").build();
+    let repo = open(&fx);
+    let snap = repo.snapshot(&paths(&["a.js"])).unwrap();
+    fx.write("a.js", "same");
+    assert_eq!(repo.changes(&snap).unwrap(), Changes::default());
+}
+
+#[test]
+fn missing_and_created_files() {
+    let fx = Fixture::builder()
+        .staged("gone.js", "g")
+        .staged("back.js", "b")
+        .build();
+    std::fs::remove_file(fx.root().join("gone.js")).unwrap();
+    std::fs::remove_file(fx.root().join("back.js")).unwrap();
+    let repo = open(&fx);
+    let snap = repo.snapshot(&paths(&["gone.js", "back.js"])).unwrap();
+    fx.write("back.js", "regenerated");
     assert_eq!(
-        open(&fx)
-            .partially_staged(&paths(&["p.js", "full.js"]))
-            .unwrap(),
-        paths(&["p.js"])
+        repo.changes(&snap).unwrap(),
+        Changes {
+            changed: vec![],
+            deleted: vec![],
+            // Missing at snapshot time means the worktree differed from the index.
+            partial_modified: paths(&["back.js"]),
+        }
     );
+}
+
+#[cfg(unix)]
+#[test]
+fn symlink_retarget_is_a_change() {
+    let fx = Fixture::builder()
+        .staged("t1", "1")
+        .staged("t2", "2")
+        .build();
+    std::os::unix::fs::symlink("t1", fx.root().join("link")).unwrap();
+    fx.git(&["add", "link"]);
+    let repo = open(&fx);
+    let snap = repo.snapshot(&paths(&["link"])).unwrap();
+    assert!(snap.partially_staged().is_empty());
+    std::fs::remove_file(fx.root().join("link")).unwrap();
+    std::os::unix::fs::symlink("t2", fx.root().join("link")).unwrap();
+    assert_eq!(repo.changes(&snap).unwrap().changed, paths(&["link"]));
+}
+
+#[test]
+fn parallel_hashing_matches_serial() {
+    let mut b = Fixture::builder();
+    for i in 0..200 {
+        b = b.staged(&format!("f{i}.txt"), format!("content {i}"));
+    }
+    let fx = b.build();
+    let repo = open(&fx);
+    let files = (0..200)
+        .map(|i| PathBuf::from(format!("f{i}.txt")))
+        .collect::<Vec<_>>();
+    let refs = files.iter().map(PathBuf::as_path).collect::<Vec<_>>();
+    let index = repo.index().unwrap();
+    let serial = repo.hash_paths(&index, &refs, 1).unwrap();
+    let parallel = repo.hash_paths(&index, &refs, 8).unwrap();
+    assert_eq!(serial.len(), 200);
+    assert!(serial.iter().all(Option::is_some));
+    assert_eq!(serial, parallel);
 }
 
 // ── backup / restore ─────────────────────────────────────────────────────────

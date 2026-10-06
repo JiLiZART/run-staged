@@ -36,8 +36,8 @@ fn no_operation_spawns_git() {
     let repo = Repo::open(fx.root(), None).unwrap();
     repo.staged_files().unwrap();
     repo.unstaged_files().unwrap();
-    repo.partially_staged(&files(&["a.js", "p.js"])).unwrap();
-    repo.worktree_ids(&files(&["a.js", "p.js"])).unwrap();
+    let snap = repo.snapshot(&files(&["a.js", "p.js"])).unwrap();
+    repo.changes(&snap).unwrap();
     repo.backup().unwrap();
     std::fs::write(fx.root().join("a.js"), "3").unwrap();
     std::fs::remove_file(fx.root().join("gone.js")).unwrap();

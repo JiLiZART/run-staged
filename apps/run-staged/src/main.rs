@@ -147,7 +147,12 @@ fn main() -> ExitCode {
         println!("{}", format_step(state, what));
     };
 
-    let runtime = match tokio::runtime::Runtime::new() {
+    // One thread: commands are separate processes, so all the concurrency here
+    // is waiting on pipes and exits. A worker per core only costs startup time.
+    let runtime = match tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+    {
         Ok(rt) => rt,
         Err(e) => return fail(format!("cannot start async runtime: {e}")),
     };

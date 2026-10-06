@@ -92,6 +92,12 @@ fn build_globsets(patterns: &[&str]) -> Result<(GlobSet, GlobSet, bool), MatchEr
     Ok((include_set, exclude_set, has_any_include))
 }
 
+/// Patterns that match every path. They skip globset, whose first regex
+/// compile costs ~2 ms in a fresh process.
+fn matches_everything(pattern: &str) -> bool {
+    matches!(pattern, "*" | "**" | "**/*")
+}
+
 /// Match staged `files` against the patterns declared in `config`.
 ///
 /// Iterates each [`Group`] in declaration order; within a group, iterates
@@ -117,21 +123,25 @@ pub fn match_files<'a>(
         let mut group_patterns: Vec<MatchedPattern> = Vec::new();
 
         for (pattern_str, commands) in &group.patterns {
-            let (include_set, exclude_set, has_any_include) =
-                build_globsets(&[pattern_str.as_str()])?;
+            let matched: Vec<PathBuf> = if matches_everything(pattern_str) {
+                files.to_vec()
+            } else {
+                let (include_set, exclude_set, has_any_include) =
+                    build_globsets(&[pattern_str.as_str()])?;
 
-            if !has_any_include {
-                return Err(MatchError::InvalidPattern(format!(
-                    "group '{}' pattern '{}' has only negation — nothing can match",
-                    group.name, pattern_str
-                )));
-            }
+                if !has_any_include {
+                    return Err(MatchError::InvalidPattern(format!(
+                        "group '{}' pattern '{}' has only negation — nothing can match",
+                        group.name, pattern_str
+                    )));
+                }
 
-            let matched: Vec<PathBuf> = files
-                .iter()
-                .filter(|p| include_set.is_match(p) && !exclude_set.is_match(p))
-                .cloned()
-                .collect();
+                files
+                    .iter()
+                    .filter(|p| include_set.is_match(p) && !exclude_set.is_match(p))
+                    .cloned()
+                    .collect()
+            };
 
             if !matched.is_empty() {
                 group_patterns.push(MatchedPattern {
@@ -219,6 +229,23 @@ mod tests {
         assert!(matched_strs.contains(&"src/foo/bar.ts".to_string()));
         assert!(matched_strs.contains(&"deep/nested/dir/x.ts".to_string()));
         assert!(!matched_strs.contains(&"foo.js".to_string()));
+    }
+
+    #[test]
+    fn match_all_fast_path_agrees_with_globset() {
+        let files = paths(&["a.js", ".env", "src/b.rs", "deep/x/.hidden", "no_ext"]);
+        for p in ["*", "**", "**/*"] {
+            let (include, exclude, _) = build_globsets(&[p]).unwrap();
+            let via_globset: Vec<_> = files
+                .iter()
+                .filter(|f| include.is_match(f) && !exclude.is_match(f))
+                .cloned()
+                .collect();
+            assert!(matches_everything(p));
+            assert_eq!(via_globset, files, "pattern {p}");
+        }
+        assert!(!matches_everything("*.js"));
+        assert!(!matches_everything("!*"));
     }
 
     #[test]

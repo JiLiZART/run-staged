@@ -35,6 +35,7 @@ impl Repo {
             let mut lock = self.lock_index()?;
             lock.write_all(&bytes)?;
             lock.commit().map_err(|e| git_err(e.error))?;
+            self.forget_index();
             Ok(())
         };
         match attempt() {
@@ -114,6 +115,7 @@ impl Repo {
             .write_to(&mut lock, Default::default())
             .map_err(git_err)?;
         lock.commit().map_err(|e| git_err(e.error))?;
+        self.forget_index();
         Ok(())
     }
 

@@ -147,3 +147,80 @@ fn runs_without_git_on_path() {
     assert_eq!(repo.index_content("a.js").as_deref(), Some("new // fmt"));
     assert!(!repo.git_dir_has("run-staged.index"));
 }
+
+#[test]
+fn same_size_rewrite_is_staged() {
+    let repo = Repo::builder()
+        .committed("a.js", "old")
+        .staged("a.js", "aaaa")
+        .file(
+            "run-staged.toml",
+            "[fmt]\npatterns = { \"*.js\" = [\"fixture-tool --replace bbbb\"] }\n",
+        )
+        .build();
+    assert_ok(&run_staged(&repo).run());
+    assert_eq!(repo.index_content("a.js").as_deref(), Some("bbbb"));
+}
+
+#[test]
+fn stale_stat_with_same_content_is_not_staged_or_partial() {
+    let repo = Repo::builder()
+        .committed("a.js", "old")
+        .staged("a.js", "new")
+        .file(
+            "run-staged.toml",
+            "[lint]\npatterns = { \"*.js\" = [\"fixture-tool\"] }\n",
+        )
+        .build();
+    // Rewrite identical bytes: the index entry's stat no longer matches.
+    repo.write("a.js", "new");
+    let index_before = std::fs::read(repo.git_dir().join("index")).unwrap();
+    let r = run_staged(&repo).run();
+    assert_ok(&r);
+    assert!(!r.stderr.contains("not staged"), "{}", r.stderr);
+    assert_eq!(
+        std::fs::read(repo.git_dir().join("index")).unwrap(),
+        index_before
+    );
+}
+
+#[test]
+fn untouched_partial_file_has_no_warning() {
+    let repo = Repo::builder()
+        .committed("a.js", "line1\n")
+        .staged("a.js", "line1\nstaged\n")
+        .unstaged("a.js", "line1\nstaged\nunstaged\n")
+        .file(
+            "run-staged.toml",
+            "[lint]\npatterns = { \"*.js\" = [\"fixture-tool\"] }\n",
+        )
+        .build();
+    let r = run_staged(&repo).run();
+    assert_ok(&r);
+    assert!(!r.stderr.contains("not staged"), "{}", r.stderr);
+    assert_eq!(
+        repo.index_content("a.js").as_deref(),
+        Some("line1\nstaged\n")
+    );
+}
+
+#[test]
+fn many_files_formatted_and_partial_ones_protected() {
+    let mut b = Repo::builder().file("run-staged.toml", FORMAT);
+    for i in 0..200 {
+        b = b.committed(&format!("f{i}.js"), "old");
+        b = b.staged(&format!("f{i}.js"), format!("new{i}"));
+    }
+    b = b.unstaged("f7.js", "new7 unstaged");
+    let repo = b.build();
+    let r = run_staged(&repo).run();
+    assert_ok(&r);
+    for i in (0..200).filter(|i| *i != 7) {
+        assert_eq!(
+            repo.index_content(&format!("f{i}.js")),
+            Some(format!("new{i} // fmt"))
+        );
+    }
+    assert_eq!(repo.index_content("f7.js").as_deref(), Some("new7"));
+    assert!(r.stderr.contains("f7.js"), "{}", r.stderr);
+}

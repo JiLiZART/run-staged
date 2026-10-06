@@ -173,8 +173,7 @@ pub async fn run(
     let candidates: Vec<PathBuf> = distinct_files(&matched, |g| !g.group.read_only)
         .into_iter()
         .collect();
-    let partial = repo.partially_staged(&candidates)?;
-    let before = repo.worktree_ids(&candidates)?;
+    let snapshot = repo.snapshot(&candidates)?;
 
     step(on_step, Step::Backup, || repo.backup().map(drop))?;
 
@@ -195,8 +194,10 @@ pub async fn run(
     }
 
     on_step(StepEvent::Started(Step::Stage));
-    let staged = stage_changes(&repo, &candidates, &before, &partial).map(|warnings| {
-        report.partial_warnings = warnings;
+    let staged = repo.changes(&snapshot).and_then(|changes| {
+        repo.stage(&changes.changed, &changes.deleted)?;
+        report.partial_warnings = changes.partial_modified;
+        Ok(())
     });
     if let Err(source) = staged {
         on_step(StepEvent::Failed(Step::Stage));
@@ -214,34 +215,6 @@ pub async fn run(
     }
     report.elapsed = start.elapsed();
     Ok(report)
-}
-
-/// Stages files commands changed, except partially staged ones, which are
-/// returned as warnings when a command modified them.
-fn stage_changes(
-    repo: &Repo,
-    candidates: &[PathBuf],
-    before: &[Option<run_staged_git::ObjectId>],
-    partial: &[PathBuf],
-) -> Result<Vec<PathBuf>, GitError> {
-    let after = repo.worktree_ids(candidates)?;
-    let mut changed = Vec::new();
-    let mut deleted = Vec::new();
-    let mut warnings = Vec::new();
-    for ((path, b), a) in candidates.iter().zip(before).zip(&after) {
-        if b == a {
-            continue;
-        }
-        if partial.contains(path) {
-            warnings.push(path.clone());
-        } else if a.is_some() {
-            changed.push(path.clone());
-        } else {
-            deleted.push(path.clone());
-        }
-    }
-    repo.stage(&changed, &deleted)?;
-    Ok(warnings)
 }
 
 async fn run_tasks(
