@@ -27,6 +27,29 @@ patterns  = { "*.rs" = ["cargo clippy -- -D warnings"] }
 Edits that commands make to fully staged files are staged again before the
 commit. Partially staged files are left alone, with a warning.
 
+### Coming from lint-staged
+
+Existing lint-staged configs work as they are: a `"lint-staged"` key in
+`package.json`, `package.yaml` or `package.yml`, or `.lintstagedrc`
+(JSON or YAML), `.lintstagedrc.json`, `.lintstagedrc.yaml`, `.lintstagedrc.yml`.
+A run-staged config in the same directory takes priority. JavaScript and
+TypeScript configs (`lint-staged.config.js`, `.lintstagedrc.ts`, …) are
+not supported; convert them to `.lintstagedrc.json`.
+
+Patterns follow lint-staged (picomatch): a pattern without `/` matches a file
+name at any depth, `*` and `?` never cross `/` (use `**`), and besides
+`{a,b}` and `[...]` you can use groups and extglobs:
+
+| Pattern | Matches |
+|---------|---------|
+| `*.(js\|ts\|tsx\|jsx)` | `a.js`, `packages/ui/src/file.test.ts` |
+| `index?(.test).ts` | `index.ts`, `index.test.ts` |
+| `+(a\|b).txt` | `ab.txt`, `bba.txt` |
+| `!(*.min).js` | `app.js`, not `lib.min.js` |
+
+A `(` always starts a group; write `\(` and `\)` to match literal
+parentheses, e.g. `app/\(auth\)/**`.
+
 ## Output
 
 In an interactive terminal, run-staged draws a live panel below your prompt:

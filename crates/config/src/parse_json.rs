@@ -64,39 +64,7 @@ fn parse_json_value(
         let flat_result: Result<HashMap<String, Vec<String>>, _> =
             serde_json::from_value(raw.clone());
         if let Ok(flat) = flat_result {
-            if flat.is_empty() {
-                return Err(ConfigError::Invalid(format!(
-                    "{path_display}: no patterns defined"
-                )));
-            }
-            let group = resolve_group(
-                RawGroupSettings {
-                    patterns: flat,
-                    name: "default".to_string(),
-                    timeout: None,
-                    execution_order: None,
-                    continue_on_error: None,
-                    per_file: None,
-                    read_only: None,
-                    chunk_size: None,
-                    path_format: None,
-                },
-                RootDefaults {
-                    timeout: &None,
-                    execution_order: &None,
-                    continue_on_error: &None,
-                    per_file: &None,
-                    read_only: &None,
-                    chunk_size: &None,
-                    path_format: &None,
-                },
-            )
-            .map_err(|e| ConfigError::Invalid(format!("{path_display}: {e}")))?;
-            return Ok(Config {
-                source,
-                groups: vec![group],
-                ..Config::default()
-            });
+            return flat_config(flat, source, path_display);
         }
 
         // Flat detection failed — try structured parse (named groups without config field names).
@@ -107,6 +75,83 @@ fn parse_json_value(
             ))),
         }
     }
+}
+
+/// A config with one `default` group built from a flat glob-to-commands map.
+fn flat_config(
+    patterns: HashMap<String, Vec<String>>,
+    source: ConfigSource,
+    path_display: &str,
+) -> Result<Config, ConfigError> {
+    if patterns.is_empty() {
+        return Err(ConfigError::Invalid(format!(
+            "{path_display}: no patterns defined"
+        )));
+    }
+    let group = resolve_group(
+        RawGroupSettings {
+            patterns,
+            name: "default".to_string(),
+            timeout: None,
+            execution_order: None,
+            continue_on_error: None,
+            per_file: None,
+            read_only: None,
+            chunk_size: None,
+            path_format: None,
+        },
+        RootDefaults {
+            timeout: &None,
+            execution_order: &None,
+            continue_on_error: &None,
+            per_file: &None,
+            read_only: &None,
+            chunk_size: &None,
+            path_format: &None,
+        },
+    )
+    .map_err(|e| ConfigError::Invalid(format!("{path_display}: {e}")))?;
+    Ok(Config {
+        source,
+        groups: vec![group],
+        ..Config::default()
+    })
+}
+
+/// Parse a lint-staged config value (from JSON or YAML): a flat mapping of
+/// glob to a command string or an array of command strings.
+pub fn parse_lint_staged_value(
+    value: serde_json::Value,
+    source: ConfigSource,
+    path_display: &str,
+) -> Result<Config, ConfigError> {
+    use serde_json::Value;
+    let Value::Object(map) = value else {
+        return Err(ConfigError::Invalid(format!(
+            "{path_display}: expected a mapping of glob patterns to commands"
+        )));
+    };
+    let bad_value = |glob: &str| {
+        ConfigError::Invalid(format!(
+            "{path_display}: \"{glob}\": expected a command string or an array of command strings"
+        ))
+    };
+    let mut patterns = HashMap::with_capacity(map.len());
+    for (glob, commands) in map {
+        let commands = match commands {
+            Value::String(command) => vec![command],
+            Value::Array(items) => items
+                .into_iter()
+                .map(|item| match item {
+                    Value::String(command) => Ok(command),
+                    _ => Err(bad_value(&glob)),
+                })
+                .collect::<Result<_, _>>()?,
+            _ => return Err(bad_value(&glob)),
+        };
+        patterns.insert(glob, commands);
+    }
+    flat_config(patterns, source, path_display)
 }
 
 /// Build a Config from a deserialized RawJsonConfig.
@@ -507,5 +552,49 @@ mod tests {
         let config = parse(json).unwrap();
         assert!(config.groups[0].read_only);
         assert_eq!(config.groups[0].chunk_size, Some(3));
+    }
+
+    fn lint_staged(json: &str) -> Result<Config, ConfigError> {
+        parse_lint_staged_value(
+            serde_json::from_str(json).unwrap(),
+            dummy_source(),
+            ".lintstagedrc.json",
+        )
+    }
+
+    #[test]
+    fn test_lint_staged_string_value_is_one_command() {
+        let config = lint_staged(r#"{"*.ts": "eslint --fix"}"#).unwrap();
+        assert_eq!(config.groups[0].patterns["*.ts"], ["eslint --fix"]);
+    }
+
+    #[test]
+    fn test_lint_staged_array_value() {
+        let config = lint_staged(r#"{"*.css": ["stylelint", "prettier --write"]}"#).unwrap();
+        assert_eq!(
+            config.groups[0].patterns["*.css"],
+            ["stylelint", "prettier --write"]
+        );
+    }
+
+    #[test]
+    fn test_lint_staged_other_value_types_name_the_key() {
+        for json in [
+            r#"{"*.ts": 1}"#,
+            r#"{"*.ts": ["ok", 2]}"#,
+            r#"{"*.ts": {"a": "b"}}"#,
+        ] {
+            let err = lint_staged(json).unwrap_err();
+            assert!(
+                matches!(err, ConfigError::Invalid(ref m) if m.contains("\"*.ts\"") && m.contains("command string")),
+                "{json}: {err:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_lint_staged_empty_mapping_has_no_patterns() {
+        let err = lint_staged("{}").unwrap_err();
+        assert!(matches!(err, ConfigError::Invalid(ref m) if m.contains("no patterns defined")));
     }
 }
