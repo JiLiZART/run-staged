@@ -4,12 +4,12 @@
 use std::time::Instant;
 
 use ratatui::{
+    Frame,
     layout::{Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
     symbols,
     text::{Line, Span},
     widgets::{Block, BorderType, LineGauge, List, ListItem, Padding},
-    Frame,
 };
 use run_staged_output::format_duration;
 

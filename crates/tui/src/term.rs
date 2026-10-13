@@ -5,12 +5,13 @@
 
 use std::{
     io::{self, Stdout, Write},
-    sync::mpsc::{channel, Receiver, RecvTimeoutError, Sender},
+    sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel},
     thread::JoinHandle,
     time::{Duration, Instant},
 };
 
 use ratatui::{
+    Terminal, TerminalOptions, Viewport,
     backend::{Backend, CrosstermBackend},
     crossterm::{
         cursor::{MoveTo, Show},
@@ -18,12 +19,11 @@ use ratatui::{
         style::ResetColor,
     },
     layout::Rect,
-    Terminal, TerminalOptions, Viewport,
 };
 
 use crate::{
     model::{Event, Model},
-    render::{draw, Theme, CHROME_ROWS},
+    render::{CHROME_ROWS, Theme, draw},
 };
 
 /// A message for the render thread: an event and when it happened.

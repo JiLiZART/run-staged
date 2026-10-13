@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 
 use run_staged_core::{Plan, RunOptions, Step, StepEvent};
 use run_staged_exec::{ExecEvent, ExecOptions};
-use run_staged_testkit::{fixture_tool_path, Repo};
+use run_staged_testkit::{Repo, fixture_tool_path};
 
 #[test]
 fn planned_first_then_backup_then_command_events_inside_tasks() {

@@ -5,7 +5,7 @@
 use std::path::PathBuf;
 
 use run_staged_config::types::{Config, Group, MatchedGroup, MatchedPattern};
-use run_staged_exec::{execute_all_with, CommandOutcome, ExecOptions};
+use run_staged_exec::{CommandOutcome, ExecOptions, execute_all_with};
 
 fn env_seen(force_color: bool) -> String {
     let tool = run_staged_testkit::fixture_tool_path()
