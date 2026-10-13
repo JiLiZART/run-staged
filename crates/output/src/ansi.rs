@@ -66,7 +66,7 @@ pub fn sanitize(input: &str, sgr: Sgr) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{sanitize, Sgr};
+    use super::{Sgr, sanitize};
 
     #[test]
     fn table() {

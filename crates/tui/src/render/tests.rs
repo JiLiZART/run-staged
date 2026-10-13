@@ -1,9 +1,9 @@
 use std::time::{Duration, Instant};
 
-use ratatui::{backend::TestBackend, style::Color, Terminal};
+use ratatui::{Terminal, backend::TestBackend, style::Color};
 use run_staged_exec::{CommandOutcome, ExecEvent, PlannedInvocation};
 
-use super::{draw, Theme};
+use super::{Theme, draw};
 use crate::model::{Event, Model, PlanGroup, PlanInfo, StepKind};
 
 fn ms(n: u64) -> Duration {
@@ -198,12 +198,14 @@ fn no_color_has_no_foreground_colors() {
         );
     }
     let colored = render(&m, t0 + ms(100), 60, 16, COLOR);
-    assert!(colored
-        .backend()
-        .buffer()
-        .content()
-        .iter()
-        .any(|c| c.fg != Color::Reset));
+    assert!(
+        colored
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .any(|c| c.fg != Color::Reset)
+    );
 }
 
 #[test]

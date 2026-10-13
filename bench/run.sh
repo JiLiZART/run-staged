@@ -153,9 +153,12 @@ write_configs() {
 # --- fixtures ----------------------------------------------------------------
 
 # fixture <scenario> <n> -> prints pristine dir path; builds it once.
+# The marker is written last: macOS purges old files under $TMPDIR but keeps
+# the directories, so a directory alone doesn't mean the fixture is intact.
 fixture() {
   local scenario=$1 n=$2 dir="$WORK/$1-$2/pristine" i
-  if [[ -d $dir ]]; then echo "$dir"; return; fi
+  if [[ -f $dir/.git/bench-ready ]]; then echo "$dir"; return; fi
+  rm -rf "$dir"
   mkdir -p "$dir"
   (
     cd "$dir"
@@ -177,6 +180,7 @@ fixture() {
       for ((i = 0; i < n; i++)); do echo UNSTAGED_MARKER >>"f$i.${EXTS[i % 4]}"; done
     fi
     if command -v overcommit >/dev/null; then overcommit --install >/dev/null 2>&1 || true; fi
+    touch .git/bench-ready
   ) >&2
   echo "$dir"
 }

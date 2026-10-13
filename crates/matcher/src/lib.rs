@@ -30,6 +30,8 @@
 
 use std::path::PathBuf;
 
+mod extglob;
+
 use globset::{GlobBuilder, GlobSet, GlobSetBuilder};
 
 use run_staged_config::types::Config;
@@ -66,15 +68,12 @@ fn build_globsets(patterns: &[&str]) -> Result<(GlobSet, GlobSet, bool), MatchEr
             (&mut include, *raw)
         };
 
-        // matchBase: if the (post-strip) pattern has no '/', auto-prefix '**/'.
-        let normalized = if !body.contains('/') {
-            format!("**/{body}")
-        } else {
-            body.to_string()
-        };
+        let normalized = match_base(body);
 
         let glob = GlobBuilder::new(&normalized)
             .case_insensitive(false)
+            // `*` and `?` stop at `/`, as in picomatch; only `**` crosses directories.
+            .literal_separator(true)
             .build()
             .map_err(|e| {
                 MatchError::InvalidPattern(format!("invalid glob pattern {raw:?}: {e}"))
@@ -90,6 +89,30 @@ fn build_globsets(patterns: &[&str]) -> Result<(GlobSet, GlobSet, bool), MatchEr
     })?;
 
     Ok((include_set, exclude_set, has_any_include))
+}
+
+/// matchBase: a pattern with no `/` matches a file name at any depth.
+fn match_base(pattern: &str) -> String {
+    if pattern.contains('/') {
+        pattern.to_string()
+    } else {
+        format!("**/{pattern}")
+    }
+}
+
+/// A leading `!` negates, except `!(`, which starts a negated extglob.
+fn is_negation(pattern: &str) -> bool {
+    pattern.starts_with('!') && !pattern.starts_with("!(")
+}
+
+/// The path with `/` separators, as patterns are written.
+fn slash_path(path: &std::path::Path) -> String {
+    let s = path.to_string_lossy();
+    if cfg!(windows) {
+        s.replace('\\', "/")
+    } else {
+        s.into_owned()
+    }
 }
 
 /// Patterns that match every path. They skip globset, whose first regex
@@ -125,6 +148,19 @@ pub fn match_files<'a>(
         for (pattern_str, commands) in &group.patterns {
             let matched: Vec<PathBuf> = if matches_everything(pattern_str) {
                 files.to_vec()
+            } else if extglob::is_extended(pattern_str) && !is_negation(pattern_str) {
+                let regex = extglob::compile(&match_base(pattern_str)).map_err(|detail| {
+                    MatchError::InvalidPattern(format!(
+                        "invalid glob pattern {pattern_str:?}: {detail}"
+                    ))
+                })?;
+                files
+                    .iter()
+                    // A path that hits fancy-regex's backtrack limit counts as
+                    // not matching; staged paths are far too short for that.
+                    .filter(|p| regex.is_match(&slash_path(p)).unwrap_or(false))
+                    .cloned()
+                    .collect()
             } else {
                 let (include_set, exclude_set, has_any_include) =
                     build_globsets(&[pattern_str.as_str()])?;
@@ -246,6 +282,14 @@ mod tests {
         }
         assert!(!matches_everything("*.js"));
         assert!(!matches_everything("!*"));
+    }
+
+    #[test]
+    fn star_stays_within_a_directory() {
+        let cfg = make_config(vec![make_group("lint", &[("src/*.ts", &["eslint"])])]);
+        let files = paths(&["src/a.ts", "src/lib/b.ts"]);
+        let res = match_files(&cfg, &files).expect("should match");
+        assert_eq!(res[0].patterns[0].files, paths(&["src/a.ts"]));
     }
 
     #[test]

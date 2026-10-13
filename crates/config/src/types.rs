@@ -8,6 +8,8 @@ pub enum ConfigSource {
     TomlFile(PathBuf),
     JsonFile(PathBuf),
     PackageJson(PathBuf),
+    /// A lint-staged config file or `lint-staged` key in a package manifest.
+    LintStaged(PathBuf),
     Explicit(PathBuf),
 }
 

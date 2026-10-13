@@ -7,6 +7,10 @@
   version.workspace      = true
 
 [dependencies]
+  fancy-regex       = { workspace = true }
   globset           = { workspace = true }
   run-staged-config = { workspace = true }
   thiserror         = { workspace = true }
+
+[dev-dependencies]
+  serde_json = { workspace = true }

@@ -3,10 +3,10 @@ use std::{
     time::{Duration, Instant},
 };
 
-use ratatui::{backend::TestBackend, Terminal};
+use ratatui::{Terminal, backend::TestBackend};
 use run_staged_exec::{CommandOutcome, ExecEvent, PlannedInvocation};
 
-use super::{render_loop, restore_sequence, Stamped};
+use super::{Stamped, render_loop, restore_sequence};
 use crate::{
     model::{Event, PlanGroup, PlanInfo, StepKind},
     render::Theme,

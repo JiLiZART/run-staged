@@ -12,16 +12,46 @@ const CONFIG_FILES: &[&str] = &[
     "run-staged.json",
 ];
 
+/// Package manifests read in YAML form, checked for a `lint-staged` key.
+const PACKAGE_YAML_FILES: &[&str] = &["package.yaml", "package.yml"];
+
+/// lint-staged's static config files, in lint-staged's own order.
+const LINT_STAGED_FILES: &[&str] = &[
+    ".lintstagedrc",
+    ".lintstagedrc.json",
+    ".lintstagedrc.yaml",
+    ".lintstagedrc.yml",
+];
+
+/// lint-staged configs that need a JavaScript runtime; rejected with a hint.
+const SCRIPT_CONFIG_FILES: &[&str] = &[
+    ".lintstagedrc.mjs",
+    ".lintstagedrc.mts",
+    ".lintstagedrc.js",
+    ".lintstagedrc.ts",
+    ".lintstagedrc.cjs",
+    ".lintstagedrc.cts",
+    "lint-staged.config.mjs",
+    "lint-staged.config.mts",
+    "lint-staged.config.js",
+    "lint-staged.config.ts",
+    "lint-staged.config.cjs",
+    "lint-staged.config.cts",
+];
+
 /// Find the config file by walking up from `start` to the git root.
-/// Checks all 5 formats in priority order per directory before moving to parent.
-/// Stops at git root (directory containing `.git/`).
+///
+/// In each directory: the run-staged files, `package.json["run-staged"]`,
+/// then lint-staged's `package.json` / `package.yaml` / `package.yml` key and
+/// `.lintstagedrc*` files. A directory whose only config is a JS/TS
+/// lint-staged config is an error. Stops at the git root (directory
+/// containing `.git/`).
 ///
 /// Returns `Err(ConfigError::NotFound)` if no config is found.
 pub fn find_config_file(start: &Path) -> Result<PathBuf, ConfigError> {
     let mut current = start.to_path_buf();
 
     loop {
-        // Check standard config files in priority order
         for name in CONFIG_FILES {
             let candidate = current.join(name);
             if candidate.exists() {
@@ -29,16 +59,27 @@ pub fn find_config_file(start: &Path) -> Result<PathBuf, ConfigError> {
             }
         }
 
-        // Check package.json — only if it contains a "run-staged" key
         let pkg = current.join("package.json");
-        if pkg.exists()
-            && std::fs::read_to_string(&pkg)
-                .ok()
-                .and_then(|c| serde_json::from_str::<serde_json::Value>(&c).ok())
-                .and_then(|v| v.get("run-staged").cloned())
-                .is_some()
-        {
+        if manifest_has_key(&pkg, "run-staged") || manifest_has_key(&pkg, "lint-staged") {
             return Ok(pkg);
+        }
+        for name in PACKAGE_YAML_FILES {
+            let candidate = current.join(name);
+            if manifest_has_key(&candidate, "lint-staged") {
+                return Ok(candidate);
+            }
+        }
+        for name in LINT_STAGED_FILES {
+            let candidate = current.join(name);
+            if candidate.exists() {
+                return Ok(candidate);
+            }
+        }
+        if let Some(name) = SCRIPT_CONFIG_FILES
+            .iter()
+            .find(|name| current.join(name).exists())
+        {
+            return Err(script_config_error(&current.join(name)));
         }
 
         // Stop if we've reached the git root (directory containing .git/)
@@ -56,17 +97,69 @@ pub fn find_config_file(start: &Path) -> Result<PathBuf, ConfigError> {
     Err(ConfigError::NotFound)
 }
 
+fn script_config_error(path: &Path) -> ConfigError {
+    ConfigError::Invalid(format!(
+        "{}: JavaScript/TypeScript lint-staged configs are not supported; \
+         convert it to .lintstagedrc.json or run-staged.toml",
+        path.display()
+    ))
+}
+
+/// Reads a package manifest (`package.json`, `package.yaml`, `package.yml`)
+/// as a JSON value.
+fn read_manifest(path: &Path) -> Result<serde_json::Value, ConfigError> {
+    let content = std::fs::read_to_string(path).map_err(ConfigError::Io)?;
+    if path.extension().is_some_and(|e| e == "json") {
+        serde_json::from_str(&content)
+            .map_err(|e| ConfigError::Invalid(format!("{}: {e}", path.display())))
+    } else {
+        parse_yaml(&content, path)
+    }
+}
+
+fn manifest_has_key(path: &Path, key: &str) -> bool {
+    path.exists()
+        && read_manifest(path)
+            .ok()
+            .is_some_and(|v| v.get(key).is_some())
+}
+
+fn parse_yaml(content: &str, path: &Path) -> Result<serde_json::Value, ConfigError> {
+    serde_saphyr::from_str(content)
+        .map_err(|e| ConfigError::Invalid(format!("{}: {e}", path.display())))
+}
+
+/// Parses a `.lintstagedrc*` file: by extension, and an extensionless
+/// `.lintstagedrc` as JSON, falling back to YAML.
+fn read_lint_staged_file(path: &Path) -> Result<serde_json::Value, ConfigError> {
+    let content = std::fs::read_to_string(path).map_err(ConfigError::Io)?;
+    match path.extension().and_then(|e| e.to_str()) {
+        Some("json") => serde_json::from_str(&content)
+            .map_err(|e| ConfigError::Invalid(format!("{}: {e}", path.display()))),
+        Some("yaml" | "yml") => parse_yaml(&content, path),
+        _ => serde_json::from_str(&content).or_else(|_| parse_yaml(&content, path)),
+    }
+}
+
 /// Parse the config at the given path, using the provided source variant.
 fn parse_config_at(path: &Path, source: ConfigSource) -> Result<Config, ConfigError> {
     let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-    if filename == "package.json" {
-        let content = std::fs::read_to_string(path).map_err(ConfigError::Io)?;
-        let pkg: serde_json::Value = serde_json::from_str(&content)
-            .map_err(|e| ConfigError::Invalid(format!("{}: {}", path.display(), e)))?;
-        let fs_value = pkg.get("run-staged").ok_or_else(|| {
-            ConfigError::Invalid(format!("{}: missing 'run-staged' key", path.display()))
-        })?;
-        parse_json::parse_package_json_value(fs_value.clone(), source)
+    let display = path.display().to_string();
+    if SCRIPT_CONFIG_FILES.contains(&filename) {
+        Err(script_config_error(path))
+    } else if filename == "package.json" || PACKAGE_YAML_FILES.contains(&filename) {
+        let mut manifest = read_manifest(path)?;
+        if let Some(value) = manifest.get_mut("run-staged").map(serde_json::Value::take) {
+            parse_json::parse_package_json_value(value, source)
+        } else if let Some(value) = manifest.get_mut("lint-staged").map(serde_json::Value::take) {
+            parse_json::parse_lint_staged_value(value, source, &format!("{display}[lint-staged]"))
+        } else {
+            Err(ConfigError::Invalid(format!(
+                "{display}: missing 'run-staged' or 'lint-staged' key"
+            )))
+        }
+    } else if LINT_STAGED_FILES.contains(&filename) {
+        parse_json::parse_lint_staged_value(read_lint_staged_file(path)?, source, &display)
     } else if filename.ends_with(".toml") {
         let mut config = parse_toml::parse_toml_file(path)?;
         config.source = source;
@@ -98,8 +191,13 @@ pub fn load_config(start: &Path, explicit_path: Option<&Path>) -> Result<Config,
             .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("");
-        let source = if filename == "package.json" {
+        let source = if filename == "package.json" && manifest_has_key(&config_path, "run-staged") {
             ConfigSource::PackageJson(config_path.clone())
+        } else if filename == "package.json"
+            || PACKAGE_YAML_FILES.contains(&filename)
+            || LINT_STAGED_FILES.contains(&filename)
+        {
+            ConfigSource::LintStaged(config_path.clone())
         } else if filename.ends_with(".toml") {
             ConfigSource::TomlFile(config_path.clone())
         } else {
@@ -331,6 +429,214 @@ mod tests {
         );
         let config = load_config(&dir.join("sub"), None).unwrap();
         assert_eq!(config.groups[0].name, "g");
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    // ── lint-staged configs ──────────────────────────────────────────────────
+
+    /// A fresh git-root temp dir containing `files`.
+    fn repo_with(suffix: &str, files: &[(&str, &str)]) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("run-staged-test-ls-{suffix}"));
+        fs::remove_dir_all(&dir).ok();
+        fs::create_dir_all(&dir).unwrap();
+        make_git_root(&dir);
+        for (name, content) in files {
+            write_file(&dir, name, content);
+        }
+        dir
+    }
+
+    fn found_name(dir: &Path) -> String {
+        let path = find_config_file(dir).unwrap();
+        path.file_name().unwrap().to_string_lossy().into_owned()
+    }
+
+    fn commands(config: &Config, glob: &str) -> Vec<String> {
+        config.groups[0].patterns[glob].clone()
+    }
+
+    const LS_JSON: &str = r#"{"*.ts": "eslint --fix"}"#;
+
+    #[test]
+    fn test_each_lint_staged_rc_name_is_found_and_parsed() {
+        // JSON is also valid YAML, so one body works for every name.
+        for (i, name) in LINT_STAGED_FILES.iter().enumerate() {
+            let dir = repo_with(&format!("rc{i}"), &[(name, LS_JSON)]);
+            assert_eq!(found_name(&dir), *name);
+            let config = load_config(&dir, None).unwrap();
+            assert!(matches!(config.source, ConfigSource::LintStaged(_)));
+            assert_eq!(commands(&config, "*.ts"), ["eslint --fix"]);
+            fs::remove_dir_all(&dir).ok();
+        }
+    }
+
+    #[test]
+    fn test_lint_staged_candidates_follow_lint_staged_order() {
+        let dir = repo_with(
+            "order",
+            &[
+                ("package.json", r#"{"lint-staged": {"*.a": "a"}}"#),
+                ("package.yaml", "lint-staged:\n  \"*.b\": b\n"),
+                (".lintstagedrc.json", r#"{"*.c": "c"}"#),
+            ],
+        );
+        assert_eq!(found_name(&dir), "package.json");
+        fs::remove_file(dir.join("package.json")).unwrap();
+        assert_eq!(found_name(&dir), "package.yaml");
+        fs::remove_file(dir.join("package.yaml")).unwrap();
+        assert_eq!(found_name(&dir), ".lintstagedrc.json");
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn test_run_staged_config_beats_lint_staged() {
+        let dir = repo_with(
+            "prio",
+            &[
+                ("run-staged.toml", "[patterns]\n\"*.rs\" = [\"x\"]\n"),
+                (".lintstagedrc.json", LS_JSON),
+            ],
+        );
+        assert_eq!(found_name(&dir), "run-staged.toml");
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn test_package_json_run_staged_key_beats_lint_staged_key() {
+        let dir = repo_with(
+            "both-keys",
+            &[(
+                "package.json",
+                r#"{"lint-staged": {"*.ts": "ls"}, "run-staged": {"*.rs": ["rs"]}}"#,
+            )],
+        );
+        let config = load_config(&dir, None).unwrap();
+        assert!(matches!(config.source, ConfigSource::PackageJson(_)));
+        assert_eq!(commands(&config, "*.rs"), ["rs"]);
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn test_package_json_lint_staged_key() {
+        let dir = repo_with(
+            "pkg-ls",
+            &[("package.json", r#"{"lint-staged": {"*.ts": ["a", "b"]}}"#)],
+        );
+        let config = load_config(&dir, None).unwrap();
+        assert!(matches!(config.source, ConfigSource::LintStaged(_)));
+        assert_eq!(commands(&config, "*.ts"), ["a", "b"]);
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn test_manifest_without_key_falls_through() {
+        let dir = repo_with(
+            "pkg-nokey",
+            &[
+                ("package.json", r#"{"name": "x"}"#),
+                ("package.yml", "name: x\n"),
+                (".lintstagedrc.json", LS_JSON),
+            ],
+        );
+        assert_eq!(found_name(&dir), ".lintstagedrc.json");
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn test_package_yml_lint_staged_key() {
+        let dir = repo_with(
+            "pkg-yml",
+            &[(
+                "package.yml",
+                "name: x\nlint-staged:\n  \"*.css\":\n    - stylelint\n    - prettier --write\n",
+            )],
+        );
+        let config = load_config(&dir, None).unwrap();
+        assert_eq!(
+            commands(&config, "*.css"),
+            ["stylelint", "prettier --write"]
+        );
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn test_extensionless_rc_falls_back_to_yaml() {
+        let dir = repo_with(
+            "rc-yaml",
+            &[(".lintstagedrc", "\"*.md\": prettier --write\n")],
+        );
+        let config = load_config(&dir, None).unwrap();
+        assert_eq!(commands(&config, "*.md"), ["prettier --write"]);
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn test_invalid_yaml_rc_is_config_error() {
+        let dir = repo_with("rc-bad", &[(".lintstagedrc.yml", "\"*.md\": [unclosed\n")]);
+        let err = load_config(&dir, None).unwrap_err();
+        assert!(
+            matches!(err, ConfigError::Invalid(ref m) if m.contains(".lintstagedrc.yml")),
+            "{err:?}"
+        );
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn test_script_configs_are_rejected_with_hint() {
+        for (i, name) in [
+            ".lintstagedrc.js",
+            ".lintstagedrc.ts",
+            ".lintstagedrc.cjs",
+            "lint-staged.config.mjs",
+            "lint-staged.config.cts",
+            "lint-staged.config.mts",
+        ]
+        .iter()
+        .enumerate()
+        {
+            let dir = repo_with(&format!("js{i}"), &[(name, "export default {}")]);
+            let err = find_config_file(&dir).unwrap_err();
+            let ConfigError::Invalid(msg) = err else {
+                panic!("expected Invalid for {name}, got {err:?}");
+            };
+            assert!(msg.contains(name), "{msg}");
+            assert!(
+                msg.contains("not supported") && msg.contains(".lintstagedrc.json"),
+                "{msg}"
+            );
+            fs::remove_dir_all(&dir).ok();
+        }
+    }
+
+    #[test]
+    fn test_static_config_beats_script_config() {
+        let dir = repo_with(
+            "js-and-json",
+            &[
+                ("lint-staged.config.js", "export default {}"),
+                (".lintstagedrc.json", LS_JSON),
+            ],
+        );
+        assert_eq!(found_name(&dir), ".lintstagedrc.json");
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn test_explicit_lint_staged_paths() {
+        let dir = repo_with(
+            "explicit",
+            &[
+                (".lintstagedrc.yml", "\"*.css\": stylelint\n"),
+                ("package.yaml", "lint-staged:\n  \"*.md\": [prettier]\n"),
+                ("lint-staged.config.js", "export default {}"),
+            ],
+        );
+        let config = load_config(Path::new("."), Some(&dir.join(".lintstagedrc.yml"))).unwrap();
+        assert!(matches!(config.source, ConfigSource::Explicit(_)));
+        assert_eq!(commands(&config, "*.css"), ["stylelint"]);
+        let config = load_config(Path::new("."), Some(&dir.join("package.yaml"))).unwrap();
+        assert_eq!(commands(&config, "*.md"), ["prettier"]);
+        assert!(load_config(Path::new("."), Some(&dir.join("lint-staged.config.js"))).is_err());
         fs::remove_dir_all(&dir).ok();
     }
 }

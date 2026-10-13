@@ -281,3 +281,57 @@ fn structured_json_with_only_new_keys() {
         "read-only: not re-staged"
     );
 }
+
+// ── lint-staged configs (add-lint-staged-compat) ────────────────────────────
+
+#[test]
+fn lintstagedrc_with_group_pattern_matches_nested_file() {
+    let repo = Repo::builder()
+        .staged("packages/diir/subdir/somedir/file.test.ts", "t")
+        .staged("README.md", "r")
+        .file(
+            ".lintstagedrc.json",
+            r#"{"*.(js|ts|tsx|jsx)": "fixture-tool"}"#,
+        )
+        .build();
+    let r = run_staged(&repo).run();
+    assert_ok(&r);
+    assert_eq!(
+        calls(&repo),
+        vec![vec!["packages/diir/subdir/somedir/file.test.ts"]]
+    );
+}
+
+#[test]
+fn js_lint_staged_config_is_rejected() {
+    let repo = Repo::builder()
+        .staged("a.ts", "a")
+        .file(
+            "lint-staged.config.js",
+            "export default { '*.ts': 'eslint' }",
+        )
+        .build();
+    let r = run_staged(&repo).run();
+    let err = assert_fails(&r, 1);
+    assert!(
+        err.contains("lint-staged.config.js") && err.contains("not supported"),
+        "{err}"
+    );
+}
+
+#[test]
+fn unbalanced_group_is_invalid_pattern() {
+    let repo = Repo::builder()
+        .staged("a.ts", "a")
+        .file(
+            "run-staged.toml",
+            "[patterns]\n\"*.(js|ts\" = [\"fixture-tool\"]\n",
+        )
+        .build();
+    let r = run_staged(&repo).run();
+    let err = assert_fails(&r, 1);
+    assert!(
+        err.contains("invalid configuration: invalid glob pattern \"*.(js|ts\""),
+        "{err}"
+    );
+}
